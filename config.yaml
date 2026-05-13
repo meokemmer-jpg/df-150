@@ -1,0 +1,132 @@
+# DF-150 KPM-Insurance-Coverage Asset-Insurance-Tracker [CRUX-MK]
+# Welle: 25 (Skeleton-Wave-2 W51-B)
+# Domain: K_0 (KPM Familien-Vermoegen-Schutz)
+
+df_id: DF-150
+df_name: kpm-insurance-coverage
+welle: 25
+domain: K_0
+status: SKELETON-CONDITIONAL
+crux-mk: true
+
+mission: |
+  Per-Asset-Insurance-Status-Tracking fuer KPM. Tracking insured/uninsured
+  Asset-Values, Premium-Total, Open-Claims, Coverage-Gaps. NIEMALS Auto-Buy
+  oder Auto-Cancel von Policies.
+
+# K11-K16
+k11_cascade_isolation: hard
+failure_blast_radius: 0
+dependency_dlq_strategy: "Eigenes State-File, append-only Insurance-Log"
+
+k12_distillation_resistenz:
+  output_feeds_into_training: false
+  provenance_required_in_output: true
+  non_llm_validation_layer: true
+
+k13_independent_ground_truth:
+  external_anchor_type: filesystem
+  external_anchor_validation_frequency: per_run
+  pre_action_domain_check: true
+  pre_action_backup_check: true
+  pre_action_blast_radius_check: true
+
+k14_human_override_decay:
+  override_complexity: single_command
+  override_documentation_freshness_days: 30
+  martin_review_cadence: weekly  # K_0 KPM
+  bus_factor_handover_drilled: false
+
+k15_entropy_budget:
+  entropy_added_loc_estimate: 200
+  entropy_added_concepts:
+    - Asset-Insurance-Tracking
+    - Coverage-Gap-Detection
+    - Premium-Aggregation
+  entropy_justified_by_rho:
+    rho_low_eur_per_year: 5000
+    rho_high_eur_per_year: 40000
+    rho_confidence: PROVISIONAL
+
+k16_concurrent_spawn_protection: both
+lock_dir: /tmp/df-150.lock
+lock_stale_age_h: 6
+engine_pgrep_check: true
+lock_release_on: EXIT_INT_TERM
+
+# LC1-LC5
+lose_coupling:
+  LC1_graceful_degradation:
+    degradation_modes:
+      - full
+      - degraded_anchor
+      - standalone
+    degradation_test_required: true
+  LC2_direct_mode:
+    direct_mode_available: true
+    direct_mode_capability: 0.85
+    direct_mode_trigger: "DF_150_REAL_API_ENABLED=false"
+  LC3_circuit_breaker:
+    circuit_breaker_timeout_s: 30
+    circuit_breaker_open_threshold: 3
+    circuit_breaker_half_open_test_interval_s: 300
+  LC4_failure_isolation:
+    state_externalization: true
+    idempotent_operations: true
+    dependency_dlq_separate: false
+  LC5_health_check:
+    health_check_dependencies: []
+    health_check_degraded_score: 0.7
+    health_check_endpoint_or_file: branch-hub/state/df-150-health.json
+
+default_action:
+  description: "Mock-Mode: lese Insurance-Log-Files, generiere Coverage-Report, NIEMALS Policy-Mutation"
+  rho_per_run_eur: 60
+  block_gates:
+    - gate_id: K13_PAV
+      block_reason: "K_0-Naehe: Anker-Check + Familien-Vermoegen-Schutz"
+      false_block_cost_eur: 10
+      legitimate_block_condition: "Env-Tag unverifiziert"
+  graceful_degradation_path: "Mock-Fallback (empty Insurance-Log)"
+
+activation_gates:
+  DF_150_REAL_API_ENABLED:
+    default: false
+    description: "Real-Read der Insurance-Provider-API"
+    requires_phronesis_ticket: true
+  DF_150_ENV:
+    default: dev
+
+q0_sperr_liste:
+  - id: Q0-1
+    rule: "Auto-Policy-Buy oder Auto-Policy-Cancel"
+    enforcement: "DF hat KEINE Insurance-Provider-API"
+  - id: Q0-2
+    rule: "Decision-Empfehlungen produzieren"
+    enforcement: "Decision-Keyword-RegEx"
+
+rho_estimate:
+  annual_eur: 22000
+  reason: "Insurance-Coverage-Audit-Automation, manuelle Asset-Reviews ~8h/Quartal eingespart"
+  schwer_quantifizierbar: false
+
+migration_provenance:
+  source_welle: 25
+  pre_skeleton_engine_loc: 200
+  reference_pattern: df-145
+  skeleton_created: 2026-05-13
+
+trinity_compliance:
+  options_presented_in_spec: true
+  variants:
+    - conservative: "Mock-Mode default"
+    - aggressive: "DF_150_REAL_API_ENABLED=true (Phase-2 Insurance-Provider-Integration)"
+    - contrarian: "DF-150 sunset wenn Insurance via externer Broker-API ersetzt"
+
+crux_bindung:
+  K_0: "KPM Familien-Vermoegen geschuetzt durch Coverage-Gap-Detection"
+  Q_0: "n/a"
+  I_min: "strukturierte K11-K16 + LC1-LC5"
+  W_0: "Manuelle Insurance-Reviews 8h/Quartal eingespart"
+
+# [CRUX-MK]
