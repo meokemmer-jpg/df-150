@@ -1,0 +1,6 @@
+{
+  "verdict": "HOLDS",
+  "reason": "Der Test nutzt echte JSON-Dateien und adversariale Varianten desselben Assets, die über die Funktion unterschiedliche Status, Coverage-Gaps und Portfolio-Summen erzeugen.",
+  "ts": "2026-07-09T01:44:28.921501+00:00",
+  "attempts": 1
+}

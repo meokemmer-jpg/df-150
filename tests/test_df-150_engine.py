@@ -1,138 +1,94 @@
-"""Universal Test-Template fuer Welle-25 DFs (DF-113 bis DF-137) [CRUX-MK]"""
-import importlib.util, sys, os, re
+import importlib
+import json
+import sys
 from pathlib import Path
 
-DF_DIR = Path(__file__).parent.parent
-DF_NAME = "df-150"  # wird substituiert pro DF
-ENGINE = DF_DIR / f"{DF_NAME}-engine.py"
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("engine", str(ENGINE))
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["engine"] = mod  # Python 3.14 dataclasses Workaround
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("150")
 
 
-def test_engine_imports():
-    """Engine kann ohne Fehler geladen werden."""
+def _write_json(path: Path, records):
+    path.write_text(json.dumps(records, indent=2), encoding="utf-8")
+    return path
+
+
+def test_df150_discriminates_insured_asset_from_adversarial_uninsured_file(tmp_path):
     mod = _load()
-    assert hasattr(mod, "collect_tracker_output")
+
+    covered_asset = {
+        "asset_id": "press-01",
+        "name": "Production press",
+        "value_eur": 120000,
+        "coverage_required_eur": 120000,
+        "insured": True,
+        "policy_active": True,
+        "insured_value_eur": 120000,
+        "premium_eur": 2400,
+    }
+    adversarial_asset = {
+        **covered_asset,
+        "insured": False,
+        "policy_active": False,
+        "insured_value_eur": 0,
+        "premium_eur": 0,
+    }
+
+    covered_path = _write_json(tmp_path / "covered_assets.json", [covered_asset])
+    adversarial_path = _write_json(
+        tmp_path / "adversarial_uninsured_assets.json",
+        [adversarial_asset],
+    )
+    claims_path = _write_json(
+        tmp_path / "claims.json",
+        [{"claim_id": "clm-1", "status": "open"}],
+    )
+
+    covered = mod.evaluate_insurance_file(covered_path, claims_path)
+    adversarial = mod.evaluate_insurance_file(adversarial_path, claims_path)
+
+    assert covered != adversarial
+    assert covered["assets"][0]["status"] == "insured"
+    assert adversarial["assets"][0]["status"] == "uninsured"
+    assert covered["coverage_gaps"] == []
+    assert adversarial["coverage_gaps"][0]["gap_eur"] == adversarial_asset["coverage_required_eur"]
+    assert covered["insured_asset_value_eur"] == covered_asset["value_eur"]
+    assert adversarial["uninsured_asset_value_eur"] == adversarial_asset["value_eur"]
+    assert covered["open_claims_count"] == adversarial["open_claims_count"] == 1
 
 
-def test_iso_now():
+def test_df150_discriminates_underinsured_asset_from_fully_covered_file(tmp_path):
     mod = _load()
-    assert hasattr(mod, "iso_now")
-    ts = mod.iso_now()
-    assert "T" in ts and ":" in ts
 
+    full_cover = {
+        "asset_id": "warehouse-02",
+        "value_eur": 300000,
+        "coverage_required_eur": 300000,
+        "insured": True,
+        "policy_active": True,
+        "insured_value_eur": 300000,
+    }
+    underinsured = {
+        **full_cover,
+        "insured_value_eur": full_cover["coverage_required_eur"] - 75000,
+    }
 
-def test_file_stable_helper():
-    mod = _load()
-    assert hasattr(mod, "_file_stable")
-    # Non-existent file -> not stable
-    assert not mod._file_stable(Path("/nonexistent/abc"))
+    full_cover_path = _write_json(tmp_path / "full_cover.json", {"assets": [full_cover]})
+    underinsured_path = _write_json(
+        tmp_path / "underinsured.json",
+        {"assets": [underinsured]},
+    )
 
+    full_cover_result = mod.evaluate_insurance_file(full_cover_path)
+    underinsured_result = mod.evaluate_insurance_file(underinsured_path)
 
-def test_k16_lock_acquire_release():
-    """K16: Concurrent-Spawn-Mutex via acquire_lock_with_identity + release_lock."""
-    mod = _load()
-    assert hasattr(mod, "acquire_lock_with_identity")
-    assert hasattr(mod, "release_lock")
-    mod.release_lock()
-    assert mod.acquire_lock_with_identity()
-    mod.release_lock()
-
-
-def test_k17_pav_detects_missing_anchor():
-    """K17: Pre-Action-Verification erkennt fehlende Anker."""
-    mod = _load()
-    assert hasattr(mod, "k17_pre_action_verification")
-    res = mod.k17_pre_action_verification([Path("/nonexistent/anchor")])
-    assert isinstance(res, dict)
-    # Either "ok"=False oder "missing_anchors" oder "failed_anchors" key
-    assert res.get("ok") is False or len(res.get("missing_anchors", res.get("failed_anchors", []))) > 0
-
-
-def test_mock_mode_default():
-    """Activation-Gate default false (Mock-Mode)."""
-    mod = _load()
-    assert hasattr(mod, "_is_real_api_enabled")
-    # Clear any matching env var
-    for k in list(os.environ.keys()):
-        if k.startswith("DF_") and "REAL_API_ENABLED" in k:
-            os.environ.pop(k, None)
-    assert mod._is_real_api_enabled() is False
-
-
-def test_decision_keyword_scanner_exists():
-    """Patch P4: Q_0-Sperr-Negative-Scan vorhanden."""
-    mod = _load()
-    assert hasattr(mod, "scan_output_for_decision_keywords")
-    assert hasattr(mod, "assert_no_decision_keywords")
-
-
-def test_decision_keyword_scanner_detects_verb_stems():
-    """FINDING-2-FIX: Verb-Stem-Pattern detected conjugated forms."""
-    mod = _load()
-    test_phrases = ["Wir entscheiden uns", "empfehlen wir", "Du solltest"]
-    detected = sum(1 for p in test_phrases if mod.scan_output_for_decision_keywords(p))
-    assert detected >= 1, f"Stem-Pattern detected {detected}/3 phrases"
-
-
-def test_collect_tracker_output_returns_valid():
-    """Engine produziert valid TrackerOutput ohne Decision-Keywords."""
-    mod = _load()
-    out = mod.collect_tracker_output()
-    assert out is not None
-    assert hasattr(out, "welle") or hasattr(out, "df") or hasattr(out, "iso_timestamp")
-
-
-def test_tracker_output_no_decision_keywords():
-    """Q_0-Sperr enforced via assert_no_decision_keywords im collect."""
-    mod = _load()
-    # collect_tracker_output ruft assert_no_decision_keywords intern auf
-    # Wenn keine Exception -> OK
-    try:
-        out = mod.collect_tracker_output()
-        assert out is not None
-    except (ValueError, AssertionError) as e:
-        if "Q_0" in str(e) or "decision" in str(e).lower():
-            assert False, f"Q_0-Sperr triggered im collect: {e}"
-        raise
-
-
-def test_main_returns_exit_code():
-    """main() returns int (0 normal, 3 lock-failed)."""
-    mod = _load()
-    assert hasattr(mod, "main")
-    mod.release_lock()
-    rc = mod.main()
-    assert rc in (0, 3, 1)  # 0=ok, 3=lock-fail, 1=non-compliant
-
-
-# K_0/Q_0-Sperr NEGATIVE-Tests (3)
-def test_no_auto_decision_in_source():
-    """Source darf keine Auto-Decision-Patterns enthalten."""
-    src = ENGINE.read_text(encoding="utf-8").lower()
-    forbidden = ["def auto_decide", "def auto_recommend", "def auto_apply", "def execute_decision"]
-    for f in forbidden:
-        assert f not in src, f"Forbidden auto-decision: {f}"
-
-
-def test_no_real_api_call_without_env():
-    """Real-API-Calls nur via _is_real_api_enabled gated."""
-    mod = _load()
-    os.environ.pop(f"DF_{DF_NAME.replace('df-', '')}_REAL_API_ENABLED", None)
-    assert not mod._is_real_api_enabled()
-
-
-def test_engine_handles_lock_collision():
-    """Lock-Collision: 2 Acquires hintereinander, 2. failed."""
-    mod = _load()
-    mod.release_lock()
-    assert mod.acquire_lock_with_identity()
-    # 2nd acquire should fail (lock already held)
-    assert not mod.acquire_lock_with_identity()
-    mod.release_lock()
+    assert full_cover_result["assets"][0]["status"] == "insured"
+    assert underinsured_result["assets"][0]["status"] == "underinsured"
+    assert full_cover_result["assets"][0]["coverage_gap_eur"] == 0
+    assert underinsured_result["assets"][0]["coverage_gap_eur"] == (
+        underinsured["coverage_required_eur"] - underinsured["insured_value_eur"]
+    )
+    assert full_cover_result != underinsured_result
