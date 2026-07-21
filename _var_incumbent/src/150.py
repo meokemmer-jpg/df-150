@@ -1,161 +1,82 @@
 from __future__ import annotations
 
-import csv
-import json
-from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping
+from dataclasses import dataclass, field
+from typing import Iterable, List, Optional
 
 
-Number = int | float
+@dataclass(frozen=True)
+class Claim:
+    claim_id: str
+    status: str
+
+    def is_open(self) -> bool:
+        return self.status.strip().lower() in {"open", "pending", "in_review"}
 
 
-def _as_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "1", "yes", "y", "ja", "active"}:
-            return True
-        if normalized in {"false", "0", "no", "n", "nein", "inactive", ""}:
-            return False
-    return bool(value)
+@dataclass(frozen=True)
+class Asset:
+    asset_id: str
+    asset_type: str
+    value_eur: float
+    insured: bool
+    covered_value_eur: float = 0.0
+    premium_eur: float = 0.0
+    claims: List[Claim] = field(default_factory=list)
+    required_coverage_eur: Optional[float] = None
+
+    def normalized_required_coverage(self) -> float:
+        if self.required_coverage_eur is None:
+            return max(self.value_eur, 0.0)
+        return max(self.required_coverage_eur, 0.0)
 
 
-def _as_eur(value: Any, field: str) -> float:
-    try:
-        amount = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field} must be numeric") from exc
-    if amount < 0:
-        raise ValueError(f"{field} must not be negative")
-    return amount
+def _money(value: float) -> float:
+    return round(float(value), 2)
 
 
-def load_records(path: str | Path) -> List[Dict[str, Any]]:
-    """
-    Load asset or claim records from a real JSON or CSV file.
-
-    JSON files may contain either a list of records or an object with an
-    "assets" or "claims" list. CSV files are returned as row dictionaries.
-    """
-    source = Path(path)
-    suffix = source.suffix.lower()
-    if suffix == ".json":
-        payload = json.loads(source.read_text(encoding="utf-8"))
-        if isinstance(payload, list):
-            return [dict(item) for item in payload]
-        if isinstance(payload, dict):
-            for key in ("assets", "claims"):
-                if isinstance(payload.get(key), list):
-                    return [dict(item) for item in payload[key]]
-        raise ValueError("JSON input must be a list or contain assets/claims")
-    if suffix == ".csv":
-        with source.open(newline="", encoding="utf-8") as handle:
-            return [dict(row) for row in csv.DictReader(handle)]
-    raise ValueError(f"Unsupported input format: {source.suffix}")
+def asset_coverage_gap(asset: Asset) -> float:
+    required = asset.normalized_required_coverage()
+    covered = max(asset.covered_value_eur, 0.0) if asset.insured else 0.0
+    return _money(max(required - covered, 0.0))
 
 
-def evaluate_insurance_status(
-    assets: Iterable[Mapping[str, Any]],
-    claims: Iterable[Mapping[str, Any]] | None = None,
-) -> Dict[str, Any]:
-    """
-    Compute per-asset and portfolio-level insurance status for df-150.
+def build_insurance_status_report(assets: Iterable[Asset]) -> dict:
+    asset_list = list(assets)
 
-    Required asset fields:
-    - asset_id
-    - value_eur
-
-    Optional asset fields:
-    - name
-    - insured
-    - premium_eur
-    - insured_value_eur
-    - coverage_required_eur
-    - policy_active
-    """
-    claims = list(claims or [])
-    asset_reports: List[Dict[str, Any]] = []
-
-    insured_asset_value = 0.0
-    uninsured_asset_value = 0.0
+    insured_value_total = 0.0
+    uninsured_value_total = 0.0
     premium_total = 0.0
-    coverage_gaps: List[Dict[str, Any]] = []
+    open_claims_count = 0
+    coverage_gaps = []
 
-    for raw_asset in assets:
-        if "asset_id" not in raw_asset:
-            raise ValueError("asset_id is required")
-        if "value_eur" not in raw_asset:
-            raise ValueError("value_eur is required")
+    for asset in asset_list:
+        covered = min(max(asset.covered_value_eur, 0.0), max(asset.value_eur, 0.0)) if asset.insured else 0.0
+        uninsured = max(asset.value_eur - covered, 0.0)
 
-        asset_id = str(raw_asset["asset_id"])
-        name = str(raw_asset.get("name", asset_id))
-        value_eur = _as_eur(raw_asset["value_eur"], "value_eur")
-        insured = _as_bool(raw_asset.get("insured", False))
-        policy_active = _as_bool(raw_asset.get("policy_active", insured))
-        premium_eur = _as_eur(raw_asset.get("premium_eur", 0.0), "premium_eur")
-        required_eur = _as_eur(
-            raw_asset.get("coverage_required_eur", value_eur),
-            "coverage_required_eur",
-        )
+        insured_value_total += covered
+        uninsured_value_total += uninsured
+        premium_total += max(asset.premium_eur, 0.0) if asset.insured else 0.0
+        open_claims_count += sum(1 for claim in asset.claims if claim.is_open())
 
-        if insured and policy_active:
-            insured_value_eur = _as_eur(
-                raw_asset.get("insured_value_eur", value_eur),
-                "insured_value_eur",
-            )
-            insured_asset_value += value_eur
-            effective_insured_value = min(insured_value_eur, value_eur)
-            gap_eur = max(0.0, required_eur - effective_insured_value)
-            status = "insured" if gap_eur == 0 else "underinsured"
-        else:
-            effective_insured_value = 0.0
-            uninsured_asset_value += value_eur
-            gap_eur = required_eur
-            status = "uninsured"
-
-        premium_total += premium_eur
-
-        asset_report = {
-            "asset_id": asset_id,
-            "name": name,
-            "status": status,
-            "value_eur": round(value_eur, 2),
-            "insured_value_eur": round(effective_insured_value, 2),
-            "premium_eur": round(premium_eur, 2),
-            "coverage_gap_eur": round(gap_eur, 2),
-            "policy_active": policy_active,
-        }
-        asset_reports.append(asset_report)
-
-        if gap_eur > 0:
+        gap = asset_coverage_gap(asset)
+        if gap > 0:
             coverage_gaps.append(
                 {
-                    "asset_id": asset_id,
-                    "name": name,
-                    "gap_eur": round(gap_eur, 2),
-                    "reason": status,
+                    "asset_id": asset.asset_id,
+                    "asset_type": asset.asset_type,
+                    "gap_eur": gap,
+                    "required_coverage_eur": _money(asset.normalized_required_coverage()),
+                    "covered_value_eur": _money(covered),
                 }
             )
 
-    open_claims_count = sum(
-        1 for claim in claims if str(claim.get("status", "")).strip().lower() == "open"
-    )
-
     return {
-        "insured_asset_value_eur": round(insured_asset_value, 2),
-        "uninsured_asset_value_eur": round(uninsured_asset_value, 2),
-        "premium_total_eur": round(premium_total, 2),
+        "insured_value_total_eur": _money(insured_value_total),
+        "uninsured_value_total_eur": _money(uninsured_value_total),
+        "premium_total_eur": _money(premium_total),
         "open_claims_count": open_claims_count,
         "coverage_gaps": coverage_gaps,
-        "assets": asset_reports,
+        "recommended_actions": [],
+        "policy_automation_permitted": False,
     }
-
-
-def evaluate_insurance_file(
-    assets_path: str | Path,
-    claims_path: str | Path | None = None,
-) -> Dict[str, Any]:
-    assets = load_records(assets_path)
-    claims = load_records(claims_path) if claims_path is not None else []
-    return evaluate_insurance_status(assets, claims)
+# [CRUX-MK]
