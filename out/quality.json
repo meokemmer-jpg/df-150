@@ -1,10 +1,10 @@
 {
   "df": "df-150",
-  "ts": "2026-07-21T03:55:56.116859+00:00",
+  "ts": "2026-07-22T03:56:13.253670+00:00",
   "maturity": "CODE",
   "maturity_level": 3,
   "evidence_grade": 1,
   "grade_basis": "doc-only: kein real gruener Test -> Grade-1 (DRAFT)",
-  "wargame_verdict": "CONDITIONAL",
+  "wargame_verdict": null,
   "crux": "[CRUX-MK]"
 }

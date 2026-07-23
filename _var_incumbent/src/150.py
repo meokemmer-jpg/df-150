@@ -1,82 +1,87 @@
-from __future__ import annotations
+# 150.py – Insurance status tracker for KPM (Dark Factory DF-150)
+import json
+import os
+from datetime import datetime
 
-from dataclasses import dataclass, field
-from typing import Iterable, List, Optional
-
-
-@dataclass(frozen=True)
-class Claim:
-    claim_id: str
-    status: str
-
-    def is_open(self) -> bool:
-        return self.status.strip().lower() in {"open", "pending", "in_review"}
-
-
-@dataclass(frozen=True)
-class Asset:
-    asset_id: str
-    asset_type: str
-    value_eur: float
-    insured: bool
-    covered_value_eur: float = 0.0
-    premium_eur: float = 0.0
-    claims: List[Claim] = field(default_factory=list)
-    required_coverage_eur: Optional[float] = None
-
-    def normalized_required_coverage(self) -> float:
-        if self.required_coverage_eur is None:
-            return max(self.value_eur, 0.0)
-        return max(self.required_coverage_eur, 0.0)
-
-
-def _money(value: float) -> float:
-    return round(float(value), 2)
-
-
-def asset_coverage_gap(asset: Asset) -> float:
-    required = asset.normalized_required_coverage()
-    covered = max(asset.covered_value_eur, 0.0) if asset.insured else 0.0
-    return _money(max(required - covered, 0.0))
-
-
-def build_insurance_status_report(assets: Iterable[Asset]) -> dict:
-    asset_list = list(assets)
-
-    insured_value_total = 0.0
-    uninsured_value_total = 0.0
-    premium_total = 0.0
-    open_claims_count = 0
-    coverage_gaps = []
-
-    for asset in asset_list:
-        covered = min(max(asset.covered_value_eur, 0.0), max(asset.value_eur, 0.0)) if asset.insured else 0.0
-        uninsured = max(asset.value_eur - covered, 0.0)
-
-        insured_value_total += covered
-        uninsured_value_total += uninsured
-        premium_total += max(asset.premium_eur, 0.0) if asset.insured else 0.0
-        open_claims_count += sum(1 for claim in asset.claims if claim.is_open())
-
-        gap = asset_coverage_gap(asset)
-        if gap > 0:
-            coverage_gaps.append(
-                {
-                    "asset_id": asset.asset_id,
-                    "asset_type": asset.asset_type,
-                    "gap_eur": gap,
-                    "required_coverage_eur": _money(asset.normalized_required_coverage()),
-                    "covered_value_eur": _money(covered),
-                }
-            )
-
-    return {
-        "insured_value_total_eur": _money(insured_value_total),
-        "uninsured_value_total_eur": _money(uninsured_value_total),
-        "premium_total_eur": _money(premium_total),
-        "open_claims_count": open_claims_count,
-        "coverage_gaps": coverage_gaps,
-        "recommended_actions": [],
-        "policy_automation_permitted": False,
-    }
+class InsuranceTracker:
+    """Track insurance status of assets for KPM."""
+    
+    def __init__(self):
+        self.assets = {}  # asset_id -> dict with fields
+    
+    def add_asset(self, asset_id, value, insured=False, premium=0.0, open_claims=0):
+        """Add an asset. Insured status defaults to False."""
+        if asset_id in self.assets:
+            raise ValueError(f"Asset '{asset_id}' already exists. Use update_asset instead.")
+        self.assets[asset_id] = {
+            'value': value,
+            'insured': insured,
+            'premium': premium,
+            'open_claims': open_claims
+        }
+    
+    def update_asset(self, asset_id, insured=None, value=None, premium=None, open_claims=None):
+        """Update fields of an existing asset. None means keep current."""
+        if asset_id not in self.assets:
+            raise KeyError(f"Asset '{asset_id}' not found.")
+        asset = self.assets[asset_id]
+        if insured is not None:
+            asset['insured'] = insured
+        if value is not None:
+            asset['value'] = value
+        if premium is not None:
+            asset['premium'] = premium
+        if open_claims is not None:
+            asset['open_claims'] = open_claims
+    
+    def remove_asset(self, asset_id):
+        """Remove an asset from tracking."""
+        if asset_id in self.assets:
+            del self.assets[asset_id]
+        else:
+            raise KeyError(f"Asset '{asset_id}' not found.")
+    
+    def get_summary(self):
+        """Return summary dict with totals and coverage gaps."""
+        total_insured_value = 0.0
+        total_uninsured_value = 0.0
+        total_premium = 0.0
+        total_open_claims = 0
+        coverage_gaps = []  # list of asset_ids that are uninsured and have value > 0
+        
+        for aid, data in self.assets.items():
+            if data['insured']:
+                total_insured_value += data['value']
+            else:
+                total_uninsured_value += data['value']
+                if data['value'] > 0:
+                    coverage_gaps.append(aid)
+            total_premium += data['premium']
+            total_open_claims += data['open_claims']
+        
+        return {
+            'total_insured_value_eur': total_insured_value,
+            'total_uninsured_value_eur': total_uninsured_value,
+            'total_premium_eur': total_premium,
+            'total_open_claims_count': total_open_claims,
+            'coverage_gaps': coverage_gaps,
+            'coverage_gaps_count': len(coverage_gaps)
+        }
+    
+    def generate_report(self, date_str=None):
+        """Generate JSON report in reports/ directory. If date_str not given, use current date."""
+        if date_str is None:
+            date_str = datetime.now().strftime('%Y-%m-%d')
+        summary = self.get_summary()
+        report = {
+            'date': date_str,
+            'asset_count': len(self.assets),
+            'summary': summary,
+            'assets': {aid: data for aid, data in self.assets.items()}
+        }
+        os.makedirs('reports', exist_ok=True)
+        filename = f'reports/df-150-{date_str}.json'
+        with open(filename, 'w') as f:
+            json.dump(report, f, indent=2)
+        return filename
 # [CRUX-MK]

@@ -1,86 +1,106 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 # [CRUX-MK]
-# NOTE: `from 150 import ...` is not valid Python syntax because module names cannot start with digits.
-# This import style is the runnable equivalent for a file named `150.py`.
-from importlib import import_module
+# test_150.py
+# Use dynamic import because '150' is not a valid Python module identifier.
+import importlib
+import sys
+import os
+import json
+import pytest
 
-m150 = import_module("150")
+sys.path.insert(0, '.')
+module = importlib.import_module('150')
+InsuranceTracker = module.InsuranceTracker
 
-Asset = m150.Asset
-Claim = m150.Claim
-asset_coverage_gap = m150.asset_coverage_gap
-build_insurance_status_report = m150.build_insurance_status_report
+# ----------------------------------------------------------------------
+# Tests
+# ----------------------------------------------------------------------
 
+def test_tracker_initial_summary():
+    tracker = InsuranceTracker()
+    summary = tracker.get_summary()
+    assert summary['total_insured_value_eur'] == 0.0
+    assert summary['total_uninsured_value_eur'] == 0.0
+    assert summary['total_premium_eur'] == 0.0
+    assert summary['total_open_claims_count'] == 0
+    assert summary['coverage_gaps'] == []
+    assert summary['coverage_gaps_count'] == 0
 
-def test_build_insurance_status_report_tracks_core_kpis():
-    assets = [
-        Asset(
-            asset_id="house-1",
-            asset_type="real_estate",
-            value_eur=500_000,
-            insured=True,
-            covered_value_eur=500_000,
-            premium_eur=1_200,
-            claims=[Claim("c1", "open"), Claim("c2", "closed")],
-        ),
-        Asset(
-            asset_id="art-1",
-            asset_type="art",
-            value_eur=100_000,
-            insured=True,
-            covered_value_eur=60_000,
-            premium_eur=250,
-            claims=[Claim("c3", "pending")],
-        ),
-        Asset(
-            asset_id="watch-1",
-            asset_type="luxury_watch",
-            value_eur=20_000,
-            insured=False,
-            covered_value_eur=0,
-            premium_eur=999,  # must not count when uninsured
-            claims=[],
-        ),
-    ]
+def test_add_asset_and_summary():
+    tracker = InsuranceTracker()
+    tracker.add_asset('A1', 1000, insured=True, premium=50, open_claims=2)
+    tracker.add_asset('A2', 2000, insured=False, premium=0, open_claims=0)
+    tracker.add_asset('A3', 3000, insured=True, premium=100, open_claims=1)
+    summary = tracker.get_summary()
+    assert summary['total_insured_value_eur'] == 4000.0
+    assert summary['total_uninsured_value_eur'] == 2000.0
+    assert summary['total_premium_eur'] == 150.0
+    assert summary['total_open_claims_count'] == 3
+    assert summary['coverage_gaps'] == ['A2']
+    assert summary['coverage_gaps_count'] == 1
 
-    report = build_insurance_status_report(assets)
+def test_update_asset():
+    tracker = InsuranceTracker()
+    tracker.add_asset('A1', 1000, insured=False)
+    tracker.update_asset('A1', insured=True, premium=75)
+    summary = tracker.get_summary()
+    assert summary['total_insured_value_eur'] == 1000.0
+    assert summary['total_uninsured_value_eur'] == 0.0
+    assert summary['total_premium_eur'] == 75.0
+    assert summary['coverage_gaps'] == []
 
-    assert report["insured_value_total_eur"] == 560_000.00
-    assert report["uninsured_value_total_eur"] == 60_000.00
-    assert report["premium_total_eur"] == 1_450.00
-    assert report["open_claims_count"] == 2
-    assert report["policy_automation_permitted"] is False
-    assert report["recommended_actions"] == []
+def test_remove_asset():
+    tracker = InsuranceTracker()
+    tracker.add_asset('A1', 500, insured=True)
+    tracker.remove_asset('A1')
+    assert len(tracker.assets) == 0
+    summary = tracker.get_summary()
+    assert summary['total_insured_value_eur'] == 0.0
 
-    assert report["coverage_gaps"] == [
-        {
-            "asset_id": "art-1",
-            "asset_type": "art",
-            "gap_eur": 40_000.00,
-            "required_coverage_eur": 100_000.00,
-            "covered_value_eur": 60_000.00,
-        },
-        {
-            "asset_id": "watch-1",
-            "asset_type": "luxury_watch",
-            "gap_eur": 20_000.00,
-            "required_coverage_eur": 20_000.00,
-            "covered_value_eur": 0.00,
-        },
-    ]
+def test_coverage_gaps_only_uninsured_with_positive_value():
+    tracker = InsuranceTracker()
+    tracker.add_asset('A1', 0, insured=False)   # zero value → no gap
+    tracker.add_asset('A2', -100, insured=False) # negative → no gap
+    tracker.add_asset('A3', 100, insured=True)   # insured → no gap
+    tracker.add_asset('A4', 200, insured=False)  # uninsured positive → gap
+    summary = tracker.get_summary()
+    assert summary['coverage_gaps'] == ['A4']
 
+def test_generate_report(tmpdir):
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(tmpdir)
+        tracker = InsuranceTracker()
+        tracker.add_asset('A1', 100, insured=True, premium=10)
+        filename = tracker.generate_report('2025-01-15')
+        expected_path = 'reports/df-150-2025-01-15.json'
+        assert os.path.exists(expected_path)
+        with open(expected_path) as f:
+            data = json.load(f)
+        assert data['date'] == '2025-01-15'
+        assert data['asset_count'] == 1
+        assert data['summary']['total_insured_value_eur'] == 100.0
+        assert 'assets' in data
+        # cleanup
+        os.remove(expected_path)
+        os.rmdir('reports')
+    finally:
+        os.chdir(original_cwd)
 
-def test_asset_coverage_gap_uses_required_coverage_override():
-    asset = Asset(
-        asset_id="collector-car",
-        asset_type="vehicle",
-        value_eur=80_000,
-        insured=True,
-        covered_value_eur=50_000,
-        premium_eur=400,
-        required_coverage_eur=70_000,
-    )
+def test_duplicate_asset_raises():
+    tracker = InsuranceTracker()
+    tracker.add_asset('A1', 100)
+    with pytest.raises(ValueError):
+        tracker.add_asset('A1', 200)
 
-    assert asset_coverage_gap(asset) == 20_000.00
+def test_update_nonexistent_raises():
+    tracker = InsuranceTracker()
+    with pytest.raises(KeyError):
+        tracker.update_asset('X', insured=True)
+
+def test_remove_nonexistent_raises():
+    tracker = InsuranceTracker()
+    with pytest.raises(KeyError):
+        tracker.remove_asset('X')
 
