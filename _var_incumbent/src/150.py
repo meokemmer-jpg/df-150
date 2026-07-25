@@ -1,87 +1,95 @@
-# 150.py – Insurance status tracker for KPM (Dark Factory DF-150)
-import json
-import os
-from datetime import datetime
+#!/usr/bin/env python3
+"""
+DF-150 KPM Insurance Coverage Tracker (Core).
+Per-Asset-Insurance-Status-Tracking.
+"""
+from dataclasses import dataclass
+from typing import List
 
-class InsuranceTracker:
-    """Track insurance status of assets for KPM."""
-    
-    def __init__(self):
-        self.assets = {}  # asset_id -> dict with fields
-    
-    def add_asset(self, asset_id, value, insured=False, premium=0.0, open_claims=0):
-        """Add an asset. Insured status defaults to False."""
-        if asset_id in self.assets:
-            raise ValueError(f"Asset '{asset_id}' already exists. Use update_asset instead.")
-        self.assets[asset_id] = {
-            'value': value,
-            'insured': insured,
-            'premium': premium,
-            'open_claims': open_claims
-        }
-    
-    def update_asset(self, asset_id, insured=None, value=None, premium=None, open_claims=None):
-        """Update fields of an existing asset. None means keep current."""
-        if asset_id not in self.assets:
-            raise KeyError(f"Asset '{asset_id}' not found.")
-        asset = self.assets[asset_id]
-        if insured is not None:
-            asset['insured'] = insured
-        if value is not None:
-            asset['value'] = value
-        if premium is not None:
-            asset['premium'] = premium
-        if open_claims is not None:
-            asset['open_claims'] = open_claims
-    
-    def remove_asset(self, asset_id):
-        """Remove an asset from tracking."""
-        if asset_id in self.assets:
-            del self.assets[asset_id]
-        else:
-            raise KeyError(f"Asset '{asset_id}' not found.")
-    
-    def get_summary(self):
-        """Return summary dict with totals and coverage gaps."""
-        total_insured_value = 0.0
-        total_uninsured_value = 0.0
-        total_premium = 0.0
-        total_open_claims = 0
-        coverage_gaps = []  # list of asset_ids that are uninsured and have value > 0
-        
-        for aid, data in self.assets.items():
-            if data['insured']:
-                total_insured_value += data['value']
-            else:
-                total_uninsured_value += data['value']
-                if data['value'] > 0:
-                    coverage_gaps.append(aid)
-            total_premium += data['premium']
-            total_open_claims += data['open_claims']
-        
-        return {
-            'total_insured_value_eur': total_insured_value,
-            'total_uninsured_value_eur': total_uninsured_value,
-            'total_premium_eur': total_premium,
-            'total_open_claims_count': total_open_claims,
-            'coverage_gaps': coverage_gaps,
-            'coverage_gaps_count': len(coverage_gaps)
-        }
-    
-    def generate_report(self, date_str=None):
-        """Generate JSON report in reports/ directory. If date_str not given, use current date."""
-        if date_str is None:
-            date_str = datetime.now().strftime('%Y-%m-%d')
-        summary = self.get_summary()
-        report = {
-            'date': date_str,
-            'asset_count': len(self.assets),
-            'summary': summary,
-            'assets': {aid: data for aid, data in self.assets.items()}
-        }
-        os.makedirs('reports', exist_ok=True)
-        filename = f'reports/df-150-{date_str}.json'
-        with open(filename, 'w') as f:
-            json.dump(report, f, indent=2)
-        return filename
+__all__ = [
+    "AssetInsurance",
+    "create_asset",
+    "uninsured_value",
+    "coverage_gap",
+    "is_fully_insured",
+    "total_insured",
+    "total_uninsured",
+    "total_premium",
+    "total_open_claims",
+    "coverage_gaps",
+    "report",
+]
+
+
+@dataclass
+class AssetInsurance:
+    """Represents the insurance status of a single asset."""
+
+    asset_id: str
+    total_value: float
+    insured_value: float
+    premium: float
+    open_claims: int
+
+
+def create_asset(
+    asset_id: str,
+    total_value: float,
+    insured_value: float,
+    premium: float,
+    open_claims: int = 0,
+) -> AssetInsurance:
+    """Create a new asset insurance record."""
+    return AssetInsurance(asset_id, total_value, insured_value, premium, open_claims)
+
+
+def uninsured_value(asset: AssetInsurance) -> float:
+    """Return the uninsured portion of the asset's value."""
+    return max(0.0, asset.total_value - asset.insured_value)
+
+
+def coverage_gap(asset: AssetInsurance) -> float:
+    """Return the coverage gap (shortfall). Same as uninsured_value."""
+    return max(0.0, asset.total_value - asset.insured_value)
+
+
+def is_fully_insured(asset: AssetInsurance) -> bool:
+    """Check if the asset is fully insured (no gap)."""
+    return asset.insured_value >= asset.total_value
+
+
+def total_insured(assets: List[AssetInsurance]) -> float:
+    """Calculate total insured value across assets."""
+    return sum(a.insured_value for a in assets)
+
+
+def total_uninsured(assets: List[AssetInsurance]) -> float:
+    """Calculate total uninsured value across assets."""
+    return sum(uninsured_value(a) for a in assets)
+
+
+def total_premium(assets: List[AssetInsurance]) -> float:
+    """Calculate total premium across assets."""
+    return sum(a.premium for a in assets)
+
+
+def total_open_claims(assets: List[AssetInsurance]) -> int:
+    """Calculate total open claims across assets."""
+    return sum(a.open_claims for a in assets)
+
+
+def coverage_gaps(assets: List[AssetInsurance]) -> List[AssetInsurance]:
+    """Return list of assets with coverage gap > 0."""
+    return [a for a in assets if coverage_gap(a) > 0]
+
+
+def report(assets: List[AssetInsurance]) -> dict:
+    """Generate a summary report of insurance coverage status."""
+    return {
+        "total_insured": total_insured(assets),
+        "total_uninsured": total_uninsured(assets),
+        "total_premium": total_premium(assets),
+        "total_open_claims": total_open_claims(assets),
+        "coverage_gap_count": len(coverage_gaps(assets)),
+    }
 # [CRUX-MK]
