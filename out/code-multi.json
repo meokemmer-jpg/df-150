@@ -1,6 +1,6 @@
 {
   "df": "df-150",
-  "ts": "2026-07-26T01:55:35.205388+00:00",
+  "ts": "2026-07-26T02:53:26.456606+00:00",
   "crux": "[CRUX-MK]",
   "winner_provider": "incumbent-kept",
   "winner_tests_passed": true,
@@ -23,9 +23,9 @@
       "parse_ok": true,
       "tests_passed": true,
       "n_tests": 1,
-      "n_assert": 14,
-      "coverage_pct": 95.0,
-      "q": 1492.0,
+      "n_assert": 7,
+      "coverage_pct": 88.0,
+      "q": 1450.0,
       "error": null
     },
     {
@@ -36,7 +36,7 @@
       "n_assert": 0,
       "coverage_pct": null,
       "q": null,
-      "error": "test parse: invalid character '–' (U+2013) (<unknown>, line 4)"
+      "error": "test parse: invalid syntax (<unknown>, line 4)"
     }
   ],
   "canonical_verify": {
