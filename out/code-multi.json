@@ -1,11 +1,11 @@
 {
   "df": "df-150",
-  "ts": "2026-07-27T02:54:47.734706+00:00",
+  "ts": "2026-07-28T01:16:11.849283+00:00",
   "crux": "[CRUX-MK]",
   "winner_provider": "incumbent-kept",
   "winner_tests_passed": true,
-  "incumbent_q": 1514.0,
-  "winner_q": 1514.0,
+  "incumbent_q": 1516.0,
+  "winner_q": 1516.0,
   "improved": false,
   "variants": [
     {
@@ -13,30 +13,30 @@
       "parse_ok": true,
       "tests_passed": true,
       "n_tests": 2,
-      "n_assert": 8,
+      "n_assert": 10,
       "coverage_pct": 100.0,
-      "q": 1514.0,
+      "q": 1516.0,
       "error": null
     },
     {
       "provider": "codex",
       "parse_ok": true,
-      "tests_passed": true,
-      "n_tests": 2,
-      "n_assert": 5,
-      "coverage_pct": 96.0,
-      "q": 1491.0,
+      "tests_passed": false,
+      "n_tests": 1,
+      "n_assert": 14,
+      "coverage_pct": null,
+      "q": 1.0,
       "error": null
     },
     {
       "provider": "local",
       "parse_ok": true,
       "tests_passed": false,
-      "n_tests": 5,
-      "n_assert": 17,
+      "n_tests": 0,
+      "n_assert": 0,
       "coverage_pct": null,
-      "q": 1.0,
-      "error": null
+      "q": null,
+      "error": "test parse: invalid syntax (<unknown>, line 4)"
     }
   ],
   "canonical_verify": {

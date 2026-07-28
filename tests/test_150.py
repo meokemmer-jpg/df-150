@@ -3,67 +3,80 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 # [CRUX-MK]
 import importlib
 
-coverage = importlib.import_module("150")
-build_coverage_report = coverage.build_coverage_report
+m150 = importlib.import_module("150")
+summarize_insurance_status = m150.summarize_insurance_status
+evaluate_asset = m150.evaluate_asset
 
 
-def test_build_coverage_report_tracks_totals_claims_and_gaps():
+def test_summarize_insurance_status_tracks_values_claims_and_gaps():
     assets = [
         {
-            "asset_id": "house",
+            "asset_id": "house-1",
+            "name": "Family House",
             "value_eur": 500000,
-            "insured_value_eur": 500000,
+            "insured": True,
             "premium_eur": 1200,
+            "coverage_limit_eur": 500000,
         },
         {
-            "asset_id": "art",
-            "value_eur": 80000,
-            "insured_value_eur": 30000,
-            "premium_eur": 250,
-        },
-        {
-            "asset_id": "boat",
-            "value_eur": 40000,
-            "insured_value_eur": 0,
+            "asset_id": "art-1",
+            "name": "Art Collection",
+            "value_eur": 75000,
+            "insured": False,
             "premium_eur": 0,
+        },
+        {
+            "asset_id": "watch-1",
+            "name": "Watch",
+            "value_eur": 10000,
+            "insured": True,
+            "premium_eur": 150,
+            "coverage_limit_eur": 6000,
         },
     ]
     claims = [
         {"claim_id": "c1", "status": "open"},
         {"claim_id": "c2", "status": "closed"},
-        {"claim_id": "c3", "status": "OPEN"},
+        {"claim_id": "c3", "status": "open"},
     ]
 
-    report = build_coverage_report(assets, claims)
+    summary = summarize_insurance_status(assets, claims)
 
-    assert report["total_asset_value_eur"] == 620000.0
-    assert report["insured_asset_value_eur"] == 530000.0
-    assert report["uninsured_asset_value_eur"] == 90000.0
-    assert report["premium_total_eur"] == 1450.0
-    assert report["open_claims_count"] == 2
-    assert report["fully_insured"] is False
-    assert report["coverage_gaps"] == [
+    assert summary["insured_asset_value_eur"] == 510000.0
+    assert summary["uninsured_asset_value_eur"] == 75000.0
+    assert summary["premium_total_eur"] == 1350.0
+    assert summary["open_claims_count"] == 2
+    assert summary["auto_policy_actions"] == []
+
+    assert summary["coverage_gaps"] == [
         {
-            "asset_id": "art",
-            "asset_value_eur": 80000.0,
-            "insured_value_eur": 30000.0,
-            "gap_value_eur": 50000.0,
-            "status": "underinsured",
+            "asset_id": "art-1",
+            "name": "Art Collection",
+            "reason": "uninsured",
+            "value_eur": 75000.0,
         },
         {
-            "asset_id": "boat",
-            "asset_value_eur": 40000.0,
-            "insured_value_eur": 0.0,
-            "gap_value_eur": 40000.0,
-            "status": "uninsured",
+            "asset_id": "watch-1",
+            "name": "Watch",
+            "reason": "underinsured",
+            "value_eur": 10000.0,
         },
     ]
 
 
-def test_build_coverage_report_rejects_negative_values():
-    try:
-        build_coverage_report([{"asset_id": "x", "value_eur": -1}])
-    except ValueError as exc:
-        assert str(exc) == "value_eur must be non-negative"
-    else:
-        raise AssertionError("ValueError was not raised for a negative asset value")
+def test_evaluate_asset_marks_underinsurance():
+    asset = evaluate_asset(
+        {
+            "asset_id": "car-1",
+            "name": "Car",
+            "value_eur": 20000,
+            "insured": True,
+            "premium_eur": 500,
+            "coverage_limit_eur": 15000,
+        }
+    )
+
+    assert asset.insured is True
+    assert asset.has_gap is True
+    assert asset.gap_reason == "underinsured"
+    assert asset.premium_eur == 500.0

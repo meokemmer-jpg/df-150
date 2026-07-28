@@ -1,79 +1,76 @@
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping
+from dataclasses import dataclass
+from typing import Iterable, List, Dict, Any
 
 
-def build_coverage_report(
-    assets: Iterable[Mapping[str, Any]],
-    claims: Iterable[Mapping[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """
-    Aggregate per-asset insurance status into a single report.
+@dataclass(frozen=True)
+class AssetCoverage:
+    asset_id: str
+    name: str
+    value_eur: float
+    insured: bool
+    premium_eur: float
+    has_gap: bool
+    gap_reason: str | None
 
-    Required asset keys:
-    - asset_id
-    - value_eur
 
-    Optional asset keys:
-    - insured_value_eur
-    - premium_eur
-    """
-    total_asset_value = 0.0
-    insured_asset_value = 0.0
-    premium_total = 0.0
-    coverage_gaps = []
+def evaluate_asset(asset: Dict[str, Any]) -> AssetCoverage:
+    asset_id = str(asset["asset_id"])
+    name = str(asset.get("name", asset_id))
+    value_eur = float(asset["value_eur"])
+    insured = bool(asset.get("insured", False))
+    premium_eur = float(asset.get("premium_eur", 0.0))
+    coverage_limit_eur = asset.get("coverage_limit_eur")
 
-    for asset in assets:
-        asset_id = asset["asset_id"]
-        value_eur = _as_non_negative_float(asset["value_eur"], field="value_eur")
-        insured_value_eur = _as_non_negative_float(
-            asset.get("insured_value_eur", 0.0),
-            field="insured_value_eur",
-        )
-        premium_eur = _as_non_negative_float(
-            asset.get("premium_eur", 0.0),
-            field="premium_eur",
-        )
+    has_gap = False
+    gap_reason = None
 
-        covered_value = min(value_eur, insured_value_eur)
-        gap_value = round(value_eur - covered_value, 2)
+    if not insured:
+        has_gap = True
+        gap_reason = "uninsured"
+    elif coverage_limit_eur is not None and float(coverage_limit_eur) < value_eur:
+        has_gap = True
+        gap_reason = "underinsured"
 
-        total_asset_value += value_eur
-        insured_asset_value += covered_value
-        premium_total += premium_eur
+    return AssetCoverage(
+        asset_id=asset_id,
+        name=name,
+        value_eur=round(value_eur, 2),
+        insured=insured,
+        premium_eur=round(premium_eur, 2),
+        has_gap=has_gap,
+        gap_reason=gap_reason,
+    )
 
-        if gap_value > 0:
-            coverage_gaps.append(
-                {
-                    "asset_id": asset_id,
-                    "asset_value_eur": round(value_eur, 2),
-                    "insured_value_eur": round(covered_value, 2),
-                    "gap_value_eur": gap_value,
-                    "status": "uninsured" if covered_value == 0 else "underinsured",
-                }
-            )
 
-    open_claims_count = 0
-    for claim in claims or ():
-        if str(claim.get("status", "")).strip().lower() == "open":
-            open_claims_count += 1
+def summarize_insurance_status(
+    assets: Iterable[Dict[str, Any]],
+    claims: Iterable[Dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
+    evaluated: List[AssetCoverage] = [evaluate_asset(asset) for asset in assets]
+    claims = list(claims or [])
 
-    uninsured_asset_value = round(total_asset_value - insured_asset_value, 2)
+    insured_value = sum(a.value_eur for a in evaluated if a.insured)
+    uninsured_value = sum(a.value_eur for a in evaluated if not a.insured)
+    premium_total = sum(a.premium_eur for a in evaluated)
+    coverage_gaps = [
+        {
+            "asset_id": a.asset_id,
+            "name": a.name,
+            "reason": a.gap_reason,
+            "value_eur": a.value_eur,
+        }
+        for a in evaluated
+        if a.has_gap
+    ]
 
     return {
-        "total_asset_value_eur": round(total_asset_value, 2),
-        "insured_asset_value_eur": round(insured_asset_value, 2),
-        "uninsured_asset_value_eur": uninsured_asset_value,
+        "insured_asset_value_eur": round(insured_value, 2),
+        "uninsured_asset_value_eur": round(uninsured_value, 2),
         "premium_total_eur": round(premium_total, 2),
-        "open_claims_count": open_claims_count,
+        "open_claims_count": sum(1 for claim in claims if claim.get("status") == "open"),
         "coverage_gaps": coverage_gaps,
-        "fully_insured": uninsured_asset_value == 0,
+        "auto_policy_actions": [],
     }
-
-
-def _as_non_negative_float(value: Any, *, field: str) -> float:
-    number = float(value)
-    if number < 0:
-        raise ValueError(f"{field} must be non-negative")
-    return number
 # [CRUX-MK]
