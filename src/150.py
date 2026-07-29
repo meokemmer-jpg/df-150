@@ -1,76 +1,124 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Dict, Any
+from typing import Any, Dict, Iterable, List
 
 
 @dataclass(frozen=True)
-class AssetCoverage:
+class Asset:
     asset_id: str
     name: str
     value_eur: float
-    insured: bool
+    required_coverages: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Policy:
+    policy_id: str
+    asset_id: str
+    covered_value_eur: float
     premium_eur: float
-    has_gap: bool
-    gap_reason: str | None
+    status: str = "active"
+    coverages: tuple[str, ...] = ()
 
 
-def evaluate_asset(asset: Dict[str, Any]) -> AssetCoverage:
-    asset_id = str(asset["asset_id"])
-    name = str(asset.get("name", asset_id))
-    value_eur = float(asset["value_eur"])
-    insured = bool(asset.get("insured", False))
-    premium_eur = float(asset.get("premium_eur", 0.0))
-    coverage_limit_eur = asset.get("coverage_limit_eur")
+@dataclass(frozen=True)
+class Claim:
+    claim_id: str
+    asset_id: str
+    status: str = "open"
 
-    has_gap = False
-    gap_reason = None
 
-    if not insured:
-        has_gap = True
-        gap_reason = "uninsured"
-    elif coverage_limit_eur is not None and float(coverage_limit_eur) < value_eur:
-        has_gap = True
-        gap_reason = "underinsured"
-
-    return AssetCoverage(
-        asset_id=asset_id,
-        name=name,
-        value_eur=round(value_eur, 2),
-        insured=insured,
-        premium_eur=round(premium_eur, 2),
-        has_gap=has_gap,
-        gap_reason=gap_reason,
+def _to_asset(item: Dict[str, Any]) -> Asset:
+    return Asset(
+        asset_id=str(item["asset_id"]),
+        name=str(item.get("name", item["asset_id"])),
+        value_eur=float(item["value_eur"]),
+        required_coverages=tuple(item.get("required_coverages", ())),
     )
 
 
-def summarize_insurance_status(
-    assets: Iterable[Dict[str, Any]],
-    claims: Iterable[Dict[str, Any]] | None = None,
-) -> Dict[str, Any]:
-    evaluated: List[AssetCoverage] = [evaluate_asset(asset) for asset in assets]
-    claims = list(claims or [])
+def _to_policy(item: Dict[str, Any]) -> Policy:
+    return Policy(
+        policy_id=str(item["policy_id"]),
+        asset_id=str(item["asset_id"]),
+        covered_value_eur=float(item["covered_value_eur"]),
+        premium_eur=float(item["premium_eur"]),
+        status=str(item.get("status", "active")).lower(),
+        coverages=tuple(item.get("coverages", ())),
+    )
 
-    insured_value = sum(a.value_eur for a in evaluated if a.insured)
-    uninsured_value = sum(a.value_eur for a in evaluated if not a.insured)
-    premium_total = sum(a.premium_eur for a in evaluated)
-    coverage_gaps = [
-        {
-            "asset_id": a.asset_id,
-            "name": a.name,
-            "reason": a.gap_reason,
-            "value_eur": a.value_eur,
-        }
-        for a in evaluated
-        if a.has_gap
-    ]
+
+def _to_claim(item: Dict[str, Any]) -> Claim:
+    return Claim(
+        claim_id=str(item["claim_id"]),
+        asset_id=str(item["asset_id"]),
+        status=str(item.get("status", "open")).lower(),
+    )
+
+
+def analyze_insurance_coverage(
+    assets: Iterable[Dict[str, Any]],
+    policies: Iterable[Dict[str, Any]],
+    claims: Iterable[Dict[str, Any]],
+) -> Dict[str, Any]:
+    asset_rows = [_to_asset(item) for item in assets]
+    active_policies = [_to_policy(item) for item in policies if str(item.get("status", "active")).lower() == "active"]
+    claim_rows = [_to_claim(item) for item in claims]
+
+    policies_by_asset: Dict[str, List[Policy]] = {}
+    for policy in active_policies:
+        policies_by_asset.setdefault(policy.asset_id, []).append(policy)
+
+    open_claims_by_asset: Dict[str, int] = {}
+    for claim in claim_rows:
+        if claim.status == "open":
+            open_claims_by_asset[claim.asset_id] = open_claims_by_asset.get(claim.asset_id, 0) + 1
+
+    per_asset = []
+    insured_total = 0.0
+    uninsured_total = 0.0
+
+    for asset in asset_rows:
+        asset_policies = policies_by_asset.get(asset.asset_id, [])
+        covered_value = min(asset.value_eur, sum(p.covered_value_eur for p in asset_policies))
+        uninsured_value = max(0.0, asset.value_eur - covered_value)
+
+        provided_coverages = {coverage for policy in asset_policies for coverage in policy.coverages}
+        missing_coverages = sorted(set(asset.required_coverages) - provided_coverages)
+
+        coverage_gaps = []
+        if not asset_policies:
+            coverage_gaps.append("no_active_policy")
+        if uninsured_value > 0:
+            coverage_gaps.append("underinsured_value")
+        if missing_coverages:
+            coverage_gaps.append("missing_required_coverages")
+
+        insured_total += covered_value
+        uninsured_total += uninsured_value
+
+        per_asset.append(
+            {
+                "asset_id": asset.asset_id,
+                "name": asset.name,
+                "asset_value_eur": asset.value_eur,
+                "insured_value_eur": covered_value,
+                "uninsured_value_eur": uninsured_value,
+                "premium_total_eur": sum(p.premium_eur for p in asset_policies),
+                "open_claims_count": open_claims_by_asset.get(asset.asset_id, 0),
+                "coverage_gaps": coverage_gaps,
+                "missing_coverages": missing_coverages,
+                "is_fully_insured": not coverage_gaps,
+            }
+        )
 
     return {
-        "insured_asset_value_eur": round(insured_value, 2),
-        "uninsured_asset_value_eur": round(uninsured_value, 2),
-        "premium_total_eur": round(premium_total, 2),
-        "open_claims_count": sum(1 for claim in claims if claim.get("status") == "open"),
-        "coverage_gaps": coverage_gaps,
-        "auto_policy_actions": [],
+        "insured_value_eur": insured_total,
+        "uninsured_value_eur": uninsured_total,
+        "premium_total_eur": sum(policy.premium_eur for policy in active_policies),
+        "open_claims_count": sum(1 for claim in claim_rows if claim.status == "open"),
+        "coverage_gaps": [row["asset_id"] for row in per_asset if row["coverage_gaps"]],
+        "assets": per_asset,
     }
 # [CRUX-MK]
