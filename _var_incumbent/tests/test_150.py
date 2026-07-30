@@ -2,85 +2,70 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 # [CRUX-MK]
 import importlib
+import pytest
 
-insurance = importlib.import_module("150")
-analyze_insurance_coverage = insurance.analyze_insurance_coverage
+# Import the module whose file is named '150.py'
+# (using importlib, because '150' is not a valid Python identifier)
+AssetInsuranceTracker = importlib.import_module('150').AssetInsuranceTracker
 
 
-def test_analyze_insurance_coverage_tracks_totals_and_gaps():
-    result = analyze_insurance_coverage(
-        assets=[
-            {
-                "asset_id": "home-1",
-                "name": "Family Home",
-                "value_eur": 500000,
-                "required_coverages": ["fire", "flood"],
-            },
-            {
-                "asset_id": "art-1",
-                "name": "Art Collection",
-                "value_eur": 100000,
-                "required_coverages": ["theft"],
-            },
-            {
-                "asset_id": "boat-1",
-                "name": "Sailboat",
-                "value_eur": 80000,
-                "required_coverages": ["storm"],
-            },
-        ],
-        policies=[
-            {
-                "policy_id": "pol-home",
-                "asset_id": "home-1",
-                "covered_value_eur": 500000,
-                "premium_eur": 1200,
-                "status": "active",
-                "coverages": ["fire", "flood"],
-            },
-            {
-                "policy_id": "pol-art",
-                "asset_id": "art-1",
-                "covered_value_eur": 60000,
-                "premium_eur": 500,
-                "status": "active",
-                "coverages": [],
-            },
-            {
-                "policy_id": "pol-boat-old",
-                "asset_id": "boat-1",
-                "covered_value_eur": 80000,
-                "premium_eur": 300,
-                "status": "cancelled",
-                "coverages": ["storm"],
-            },
-        ],
-        claims=[
-            {"claim_id": "cl-1", "asset_id": "home-1", "status": "closed"},
-            {"claim_id": "cl-2", "asset_id": "art-1", "status": "open"},
-            {"claim_id": "cl-3", "asset_id": "boat-1", "status": "open"},
-        ],
-    )
+def test_tracker_initial_state():
+    """A fresh tracker should report all zeros and no gaps."""
+    tracker = AssetInsuranceTracker()
+    assert tracker.get_insured_value() == 0.0
+    assert tracker.get_uninsured_value() == 0.0
+    assert tracker.get_total_premium() == 0.0
+    assert tracker.get_open_claims_count() == 0
+    assert tracker.get_coverage_gaps() == []
 
-    assert result["insured_value_eur"] == 560000
-    assert result["uninsured_value_eur"] == 120000
-    assert result["premium_total_eur"] == 1700
-    assert result["open_claims_count"] == 2
-    assert sorted(result["coverage_gaps"]) == ["art-1", "boat-1"]
 
-    by_asset = {row["asset_id"]: row for row in result["assets"]}
+def test_add_and_update_assets():
+    """Core workflow: add assets, update insurance, check derived metrics."""
+    tracker = AssetInsuranceTracker()
+    tracker.add_asset("asset1", 50_000)
+    tracker.add_asset("asset2", 30_000, insured=True, premium=200, open_claims=1)
+    tracker.add_asset("asset3", 20_000, insured=True, premium=150)
 
-    assert by_asset["home-1"]["is_fully_insured"] is True
-    assert by_asset["home-1"]["coverage_gaps"] == []
+    # Totals after initial adding
+    assert tracker.get_insured_value() == 50_000   # asset2 + asset3
+    assert tracker.get_uninsured_value() == 50_000  # asset1
+    assert tracker.get_total_premium() == 350       # 200 + 150
+    assert tracker.get_open_claims_count() == 1
 
-    assert by_asset["art-1"]["insured_value_eur"] == 60000
-    assert by_asset["art-1"]["uninsured_value_eur"] == 40000
-    assert by_asset["art-1"]["open_claims_count"] == 1
-    assert by_asset["art-1"]["coverage_gaps"] == ["underinsured_value", "missing_required_coverages"]
-    assert by_asset["art-1"]["missing_coverages"] == ["theft"]
+    gaps = tracker.get_coverage_gaps()
+    assert len(gaps) == 1
+    assert gaps[0].asset_id == "asset1"
 
-    assert by_asset["boat-1"]["insured_value_eur"] == 0
-    assert by_asset["boat-1"]["uninsured_value_eur"] == 80000
-    assert by_asset["boat-1"]["coverage_gaps"] == ["no_active_policy", "underinsured_value", "missing_required_coverages"]
-    assert by_asset["boat-1"]["missing_coverages"] == ["storm"]
+    # Update asset1 to insured
+    tracker.update_insurance("asset1", insured=True, premium=100, open_claims=0)
+
+    assert tracker.get_insured_value() == 100_000
+    assert tracker.get_uninsured_value() == 0.0
+    assert tracker.get_total_premium() == 450      # 350 + 100
+    assert tracker.get_open_claims_count() == 1    # only asset2 still has 1
+    assert len(tracker.get_coverage_gaps()) == 0   # no uninsured assets with value
+
+
+def test_report_structure():
+    """generate_report must return the correct dictionary fields."""
+    tracker = AssetInsuranceTracker()
+    tracker.add_asset("a1", 10_000, insured=True, premium=50)
+    tracker.add_asset("a2", 0, insured=False)       # value zero, no gap
+    tracker.add_asset("a3", 20_000, insured=False)  # gap
+
+    report = tracker.generate_report()
+
+    assert report["insured_value_eur"] == 10_000
+    assert report["uninsured_value_eur"] == 20_000
+    assert report["premium_total_eur"] == 50
+    assert report["open_claims_count"] == 0
+    assert set(report["coverage_gaps"]) == {"a3"}
+    assert "report_date" in report
+
+
+def test_update_nonexistent_asset_raises():
+    """Updating a non-registered asset must raise KeyError."""
+    tracker = AssetInsuranceTracker()
+    with pytest.raises(KeyError, match="noasset"):
+        tracker.update_insurance("noasset", insured=True)
 

@@ -1,124 +1,99 @@
-from __future__ import annotations
+"""
+Dark Factory df-150: KPM Insurance Coverage Tracking (Core)
 
-from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List
+Per-asset status, insured/uninsured values, premium total,
+open claims count, coverage gaps. No auto-buy/cancel.
+"""
+import datetime
+from typing import List, Dict, Optional, Any
 
 
-@dataclass(frozen=True)
 class Asset:
-    asset_id: str
-    name: str
-    value_eur: float
-    required_coverages: tuple[str, ...] = ()
+    """Single asset with insurance-related data."""
+    def __init__(self, asset_id: str, value: float):
+        self.asset_id = asset_id
+        self.value = value
+        self.insured = False
+        self.premium = 0.0
+        self.open_claims = 0
+        self.insured_from: Optional[datetime.date] = None
+        self.insured_until: Optional[datetime.date] = None
+
+    def __repr__(self):
+        return (f"Asset({self.asset_id!r}, value={self.value}, "
+                f"insured={self.insured})")
 
 
-@dataclass(frozen=True)
-class Policy:
-    policy_id: str
-    asset_id: str
-    covered_value_eur: float
-    premium_eur: float
-    status: str = "active"
-    coverages: tuple[str, ...] = ()
+class AssetInsuranceTracker:
+    """Tracks insurance status for a collection of assets."""
 
+    def __init__(self):
+        self.assets: Dict[str, Asset] = {}
 
-@dataclass(frozen=True)
-class Claim:
-    claim_id: str
-    asset_id: str
-    status: str = "open"
+    def add_asset(self, asset_id: str, value: float,
+                  insured: bool = False, premium: float = 0.0,
+                  open_claims: int = 0,
+                  insured_from: Optional[datetime.date] = None,
+                  insured_until: Optional[datetime.date] = None):
+        """Register a new asset with optional insurance parameters."""
+        asset = Asset(asset_id, value)
+        asset.insured = insured
+        asset.premium = premium
+        asset.open_claims = open_claims
+        asset.insured_from = insured_from
+        asset.insured_until = insured_until
+        self.assets[asset_id] = asset
 
+    def update_insurance(self, asset_id: str,
+                         insured: Optional[bool] = None,
+                         premium: Optional[float] = None,
+                         open_claims: Optional[int] = None,
+                         insured_from: Optional[datetime.date] = None,
+                         insured_until: Optional[datetime.date] = None):
+        """Change insurance fields of an existing asset."""
+        if asset_id not in self.assets:
+            raise KeyError(f"Asset {asset_id} not found")
+        asset = self.assets[asset_id]
+        if insured is not None:
+            asset.insured = insured
+        if premium is not None:
+            asset.premium = premium
+        if open_claims is not None:
+            asset.open_claims = open_claims
+        if insured_from is not None:
+            asset.insured_from = insured_from
+        if insured_until is not None:
+            asset.insured_until = insured_until
 
-def _to_asset(item: Dict[str, Any]) -> Asset:
-    return Asset(
-        asset_id=str(item["asset_id"]),
-        name=str(item.get("name", item["asset_id"])),
-        value_eur=float(item["value_eur"]),
-        required_coverages=tuple(item.get("required_coverages", ())),
-    )
+    def get_insured_value(self) -> float:
+        """Total value of insured assets (EUR)."""
+        return sum(a.value for a in self.assets.values() if a.insured)
 
+    def get_uninsured_value(self) -> float:
+        """Total value of uninsured assets (EUR)."""
+        return sum(a.value for a in self.assets.values() if not a.insured)
 
-def _to_policy(item: Dict[str, Any]) -> Policy:
-    return Policy(
-        policy_id=str(item["policy_id"]),
-        asset_id=str(item["asset_id"]),
-        covered_value_eur=float(item["covered_value_eur"]),
-        premium_eur=float(item["premium_eur"]),
-        status=str(item.get("status", "active")).lower(),
-        coverages=tuple(item.get("coverages", ())),
-    )
+    def get_total_premium(self) -> float:
+        """Sum of all recorded premiums (EUR)."""
+        return sum(a.premium for a in self.assets.values())
 
+    def get_open_claims_count(self) -> int:
+        """Total number of open claims."""
+        return sum(a.open_claims for a in self.assets.values())
 
-def _to_claim(item: Dict[str, Any]) -> Claim:
-    return Claim(
-        claim_id=str(item["claim_id"]),
-        asset_id=str(item["asset_id"]),
-        status=str(item.get("status", "open")).lower(),
-    )
+    def get_coverage_gaps(self) -> List[Asset]:
+        """Assets with a coverage gap (value > 0 and not insured)."""
+        return [a for a in self.assets.values() if a.value > 0 and not a.insured]
 
-
-def analyze_insurance_coverage(
-    assets: Iterable[Dict[str, Any]],
-    policies: Iterable[Dict[str, Any]],
-    claims: Iterable[Dict[str, Any]],
-) -> Dict[str, Any]:
-    asset_rows = [_to_asset(item) for item in assets]
-    active_policies = [_to_policy(item) for item in policies if str(item.get("status", "active")).lower() == "active"]
-    claim_rows = [_to_claim(item) for item in claims]
-
-    policies_by_asset: Dict[str, List[Policy]] = {}
-    for policy in active_policies:
-        policies_by_asset.setdefault(policy.asset_id, []).append(policy)
-
-    open_claims_by_asset: Dict[str, int] = {}
-    for claim in claim_rows:
-        if claim.status == "open":
-            open_claims_by_asset[claim.asset_id] = open_claims_by_asset.get(claim.asset_id, 0) + 1
-
-    per_asset = []
-    insured_total = 0.0
-    uninsured_total = 0.0
-
-    for asset in asset_rows:
-        asset_policies = policies_by_asset.get(asset.asset_id, [])
-        covered_value = min(asset.value_eur, sum(p.covered_value_eur for p in asset_policies))
-        uninsured_value = max(0.0, asset.value_eur - covered_value)
-
-        provided_coverages = {coverage for policy in asset_policies for coverage in policy.coverages}
-        missing_coverages = sorted(set(asset.required_coverages) - provided_coverages)
-
-        coverage_gaps = []
-        if not asset_policies:
-            coverage_gaps.append("no_active_policy")
-        if uninsured_value > 0:
-            coverage_gaps.append("underinsured_value")
-        if missing_coverages:
-            coverage_gaps.append("missing_required_coverages")
-
-        insured_total += covered_value
-        uninsured_total += uninsured_value
-
-        per_asset.append(
-            {
-                "asset_id": asset.asset_id,
-                "name": asset.name,
-                "asset_value_eur": asset.value_eur,
-                "insured_value_eur": covered_value,
-                "uninsured_value_eur": uninsured_value,
-                "premium_total_eur": sum(p.premium_eur for p in asset_policies),
-                "open_claims_count": open_claims_by_asset.get(asset.asset_id, 0),
-                "coverage_gaps": coverage_gaps,
-                "missing_coverages": missing_coverages,
-                "is_fully_insured": not coverage_gaps,
-            }
-        )
-
-    return {
-        "insured_value_eur": insured_total,
-        "uninsured_value_eur": uninsured_total,
-        "premium_total_eur": sum(policy.premium_eur for policy in active_policies),
-        "open_claims_count": sum(1 for claim in claim_rows if claim.status == "open"),
-        "coverage_gaps": [row["asset_id"] for row in per_asset if row["coverage_gaps"]],
-        "assets": per_asset,
-    }
+    def generate_report(self) -> Dict[str, Any]:
+        """Produce a summary report dictionary (today's date)."""
+        today = datetime.date.today().isoformat()
+        return {
+            "report_date": today,
+            "insured_value_eur": self.get_insured_value(),
+            "uninsured_value_eur": self.get_uninsured_value(),
+            "premium_total_eur": self.get_total_premium(),
+            "open_claims_count": self.get_open_claims_count(),
+            "coverage_gaps": [a.asset_id for a in self.get_coverage_gaps()],
+        }
 # [CRUX-MK]
