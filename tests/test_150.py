@@ -1,70 +1,58 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 # [CRUX-MK]
+# NOTE: Python normally forbids numeric module names. The required import 'from 150 import ...'
+# is syntactically invalid. We simulate the required behaviour via importlib.
 import importlib
-import pytest
-
-# Import the module whose file is named '150.py'
-# (using importlib, because '150' is not a valid Python identifier)
-AssetInsuranceTracker = importlib.import_module('150').AssetInsuranceTracker
+insurance_status = importlib.import_module('150').insurance_status
 
 
-def test_tracker_initial_state():
-    """A fresh tracker should report all zeros and no gaps."""
-    tracker = AssetInsuranceTracker()
-    assert tracker.get_insured_value() == 0.0
-    assert tracker.get_uninsured_value() == 0.0
-    assert tracker.get_total_premium() == 0.0
-    assert tracker.get_open_claims_count() == 0
-    assert tracker.get_coverage_gaps() == []
+def test_empty_assets():
+    result = insurance_status([])
+    assert result == {
+        'total_insured_value': 0.0,
+        'total_uninsured_value': 0.0,
+        'total_premium': 0.0,
+        'open_claims_count': 0,
+        'coverage_gaps': [],
+    }
 
 
-def test_add_and_update_assets():
-    """Core workflow: add assets, update insurance, check derived metrics."""
-    tracker = AssetInsuranceTracker()
-    tracker.add_asset("asset1", 50_000)
-    tracker.add_asset("asset2", 30_000, insured=True, premium=200, open_claims=1)
-    tracker.add_asset("asset3", 20_000, insured=True, premium=150)
-
-    # Totals after initial adding
-    assert tracker.get_insured_value() == 50_000   # asset2 + asset3
-    assert tracker.get_uninsured_value() == 50_000  # asset1
-    assert tracker.get_total_premium() == 350       # 200 + 150
-    assert tracker.get_open_claims_count() == 1
-
-    gaps = tracker.get_coverage_gaps()
-    assert len(gaps) == 1
-    assert gaps[0].asset_id == "asset1"
-
-    # Update asset1 to insured
-    tracker.update_insurance("asset1", insured=True, premium=100, open_claims=0)
-
-    assert tracker.get_insured_value() == 100_000
-    assert tracker.get_uninsured_value() == 0.0
-    assert tracker.get_total_premium() == 450      # 350 + 100
-    assert tracker.get_open_claims_count() == 1    # only asset2 still has 1
-    assert len(tracker.get_coverage_gaps()) == 0   # no uninsured assets with value
+def test_mixed_assets():
+    assets = [
+        {'name': 'Building A', 'value': 5_000_000.0, 'insured': True, 'premium': 2500.0, 'open_claims': 1},
+        {'name': 'Vehicle Fleet', 'value': 200_000.0, 'insured': False, 'premium': 0.0, 'open_claims': 0},
+        {'name': 'Art Collection', 'value': 1_500_000.0, 'insured': True, 'premium': 5000.0, 'open_claims': 2},
+        {'name': 'Liability', 'value': 0.0, 'insured': False, 'premium': 1000.0, 'open_claims': 0},
+    ]
+    result = insurance_status(assets)
+    assert result['total_insured_value'] == 6_500_000.0
+    assert result['total_uninsured_value'] == 200_000.0
+    assert result['total_premium'] == 8500.0
+    assert result['open_claims_count'] == 3
+    assert set(result['coverage_gaps']) == {'Vehicle Fleet', 'Liability'}
 
 
-def test_report_structure():
-    """generate_report must return the correct dictionary fields."""
-    tracker = AssetInsuranceTracker()
-    tracker.add_asset("a1", 10_000, insured=True, premium=50)
-    tracker.add_asset("a2", 0, insured=False)       # value zero, no gap
-    tracker.add_asset("a3", 20_000, insured=False)  # gap
-
-    report = tracker.generate_report()
-
-    assert report["insured_value_eur"] == 10_000
-    assert report["uninsured_value_eur"] == 20_000
-    assert report["premium_total_eur"] == 50
-    assert report["open_claims_count"] == 0
-    assert set(report["coverage_gaps"]) == {"a3"}
-    assert "report_date" in report
+def test_all_insured():
+    assets = [
+        {'name': 'Item1', 'value': 100.0, 'insured': True, 'premium': 10.0, 'open_claims': 0},
+        {'name': 'Item2', 'value': 200.0, 'insured': True, 'premium': 20.0, 'open_claims': 5},
+    ]
+    result = insurance_status(assets)
+    assert result['total_insured_value'] == 300.0
+    assert result['total_uninsured_value'] == 0.0
+    assert result['total_premium'] == 30.0
+    assert result['open_claims_count'] == 5
+    assert result['coverage_gaps'] == []
 
 
-def test_update_nonexistent_asset_raises():
-    """Updating a non-registered asset must raise KeyError."""
-    tracker = AssetInsuranceTracker()
-    with pytest.raises(KeyError, match="noasset"):
-        tracker.update_insurance("noasset", insured=True)
+def test_all_uninsured():
+    assets = [
+        {'name': 'Risky', 'value': 50.0, 'insured': False, 'premium': 0.0, 'open_claims': 0},
+    ]
+    result = insurance_status(assets)
+    assert result['total_insured_value'] == 0.0
+    assert result['total_uninsured_value'] == 50.0
+    assert result['total_premium'] == 0.0
+    assert result['open_claims_count'] == 0
+    assert result['coverage_gaps'] == ['Risky']
