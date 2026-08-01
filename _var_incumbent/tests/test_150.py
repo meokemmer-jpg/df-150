@@ -1,59 +1,70 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 # [CRUX-MK]
-# NOTE: Python normally forbids numeric module names. The required import 'from 150 import ...'
-# is syntactically invalid. We simulate the required behaviour via importlib.
 import importlib
-insurance_status = importlib.import_module('150').insurance_status
+
+m150 = importlib.import_module("150")
+build_insurance_report = m150.build_insurance_report
+evaluate_asset = m150.evaluate_asset
+write_report = m150.write_report
 
 
-def test_empty_assets():
-    result = insurance_status([])
-    assert result == {
-        'total_insured_value': 0.0,
-        'total_uninsured_value': 0.0,
-        'total_premium': 0.0,
-        'open_claims_count': 0,
-        'coverage_gaps': [],
-    }
-
-
-def test_mixed_assets():
+def test_build_insurance_report_tracks_totals_gaps_and_open_claims(tmp_path):
     assets = [
-        {'name': 'Building A', 'value': 5_000_000.0, 'insured': True, 'premium': 2500.0, 'open_claims': 1},
-        {'name': 'Vehicle Fleet', 'value': 200_000.0, 'insured': False, 'premium': 0.0, 'open_claims': 0},
-        {'name': 'Art Collection', 'value': 1_500_000.0, 'insured': True, 'premium': 5000.0, 'open_claims': 2},
-        {'name': 'Liability', 'value': 0.0, 'insured': False, 'premium': 1000.0, 'open_claims': 0},
+        {
+            "asset_id": "home-main",
+            "asset_value_eur": 500000,
+            "insured_value_eur": 500000,
+            "premium_eur": 1200,
+        },
+        {
+            "asset_id": "art-collection",
+            "asset_value_eur": 150000,
+            "insured_value_eur": 50000,
+            "premium_eur": 300,
+        },
+        {
+            "asset_id": "jewelry",
+            "asset_value_eur": 20000,
+            "insured_value_eur": 0,
+            "premium_eur": 0,
+        },
     ]
-    result = insurance_status(assets)
-    assert result['total_insured_value'] == 6_500_000.0
-    assert result['total_uninsured_value'] == 200_000.0
-    assert result['total_premium'] == 8500.0
-    assert result['open_claims_count'] == 3
-    assert set(result['coverage_gaps']) == {'Vehicle Fleet', 'Liability'}
-
-
-def test_all_insured():
-    assets = [
-        {'name': 'Item1', 'value': 100.0, 'insured': True, 'premium': 10.0, 'open_claims': 0},
-        {'name': 'Item2', 'value': 200.0, 'insured': True, 'premium': 20.0, 'open_claims': 5},
+    claims = [
+        {"claim_id": "c1", "status": "open"},
+        {"claim_id": "c2", "status": "closed"},
+        {"claim_id": "c3", "status": "open"},
     ]
-    result = insurance_status(assets)
-    assert result['total_insured_value'] == 300.0
-    assert result['total_uninsured_value'] == 0.0
-    assert result['total_premium'] == 30.0
-    assert result['open_claims_count'] == 5
-    assert result['coverage_gaps'] == []
 
+    report = build_insurance_report(assets, claims)
 
-def test_all_uninsured():
-    assets = [
-        {'name': 'Risky', 'value': 50.0, 'insured': False, 'premium': 0.0, 'open_claims': 0},
+    assert report["insured_asset_value_eur"] == 550000.0
+    assert report["uninsured_asset_value_eur"] == 120000.0
+    assert report["premium_total_eur"] == 1500.0
+    assert report["open_claims_count"] == 2
+    assert report["auto_policy_actions"] == []
+    assert report["coverage_gaps"] == [
+        {"asset_id": "art-collection", "gap_value_eur": 100000.0},
+        {"asset_id": "jewelry", "gap_value_eur": 20000.0},
     ]
-    result = insurance_status(assets)
-    assert result['total_insured_value'] == 0.0
-    assert result['total_uninsured_value'] == 50.0
-    assert result['total_premium'] == 0.0
-    assert result['open_claims_count'] == 0
-    assert result['coverage_gaps'] == ['Risky']
+
+    path = write_report(assets, claims, output_dir=tmp_path, report_date=__import__("datetime").date(2026, 8, 1))
+    assert path.name == "df-150-2026-08-01.json"
+    assert path.exists()
+
+
+def test_evaluate_asset_rejects_overinsured_asset():
+    try:
+        evaluate_asset(
+            {
+                "asset_id": "bad-asset",
+                "asset_value_eur": 1000,
+                "insured_value_eur": 1001,
+                "premium_eur": 10,
+            }
+        )
+    except ValueError as exc:
+        assert "cannot exceed" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for overinsured asset")
 

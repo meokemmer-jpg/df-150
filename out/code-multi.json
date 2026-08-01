@@ -1,32 +1,32 @@
 {
   "df": "df-150",
-  "ts": "2026-07-31T02:22:40.197540+00:00",
+  "ts": "2026-08-01T02:07:07.387745+00:00",
   "crux": "[CRUX-MK]",
   "winner_provider": "incumbent-kept",
   "winner_tests_passed": true,
-  "incumbent_q": 1528.0,
-  "winner_q": 1528.0,
+  "incumbent_q": 1475.0,
+  "winner_q": 1475.0,
   "improved": false,
   "variants": [
     {
       "provider": "incumbent",
       "parse_ok": true,
       "tests_passed": true,
-      "n_tests": 4,
-      "n_assert": 16,
-      "coverage_pct": 100.0,
-      "q": 1528.0,
+      "n_tests": 2,
+      "n_assert": 9,
+      "coverage_pct": 92.0,
+      "q": 1475.0,
       "error": null
     },
     {
       "provider": "codex",
-      "parse_ok": true,
-      "tests_passed": true,
-      "n_tests": 1,
-      "n_assert": 5,
-      "coverage_pct": 100.0,
-      "q": 1508.0,
-      "error": null
+      "parse_ok": false,
+      "tests_passed": false,
+      "n_tests": 0,
+      "n_assert": null,
+      "coverage_pct": null,
+      "q": 0.0,
+      "error": "[codex-Fehler: Command '['codex', 'exec', '--skip-git-repo-check', '-m', 'gpt-5.4']' timed out after 220 seconds]"
     },
     {
       "provider": "local",
@@ -36,7 +36,7 @@
       "n_assert": 0,
       "coverage_pct": null,
       "q": null,
-      "error": "test parse: invalid syntax (<unknown>, line 6)"
+      "error": "test parse: invalid syntax (<unknown>, line 4)"
     }
   ],
   "canonical_verify": {
