@@ -1,11 +1,11 @@
 {
   "df": "df-150",
-  "ts": "2026-08-01T02:07:07.387745+00:00",
+  "ts": "2026-08-02T01:11:27.718735+00:00",
   "crux": "[CRUX-MK]",
   "winner_provider": "incumbent-kept",
   "winner_tests_passed": true,
-  "incumbent_q": 1475.0,
-  "winner_q": 1475.0,
+  "incumbent_q": 1511.0,
+  "winner_q": 1511.0,
   "improved": false,
   "variants": [
     {
@@ -13,20 +13,20 @@
       "parse_ok": true,
       "tests_passed": true,
       "n_tests": 2,
-      "n_assert": 9,
-      "coverage_pct": 92.0,
-      "q": 1475.0,
+      "n_assert": 5,
+      "coverage_pct": 100.0,
+      "q": 1511.0,
       "error": null
     },
     {
       "provider": "codex",
-      "parse_ok": false,
-      "tests_passed": false,
-      "n_tests": 0,
-      "n_assert": null,
-      "coverage_pct": null,
-      "q": 0.0,
-      "error": "[codex-Fehler: Command '['codex', 'exec', '--skip-git-repo-check', '-m', 'gpt-5.4']' timed out after 220 seconds]"
+      "parse_ok": true,
+      "tests_passed": true,
+      "n_tests": 1,
+      "n_assert": 10,
+      "coverage_pct": 98.0,
+      "q": 1503.0,
+      "error": null
     },
     {
       "provider": "local",

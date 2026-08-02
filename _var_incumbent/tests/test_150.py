@@ -1,70 +1,65 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 # [CRUX-MK]
+# `from 150 import ...` is invalid Python syntax because module names cannot start with a digit.
+# For a real green pytest run against `150.py`, use importlib.
 import importlib
 
-m150 = importlib.import_module("150")
-build_insurance_report = m150.build_insurance_report
-evaluate_asset = m150.evaluate_asset
-write_report = m150.write_report
+mod = importlib.import_module("150")
+calculate_insurance_status = mod.calculate_insurance_status
 
 
-def test_build_insurance_report_tracks_totals_gaps_and_open_claims(tmp_path):
+def test_calculate_insurance_status_tracks_core_kpm_metrics():
     assets = [
         {
-            "asset_id": "home-main",
-            "asset_value_eur": 500000,
-            "insured_value_eur": 500000,
+            "asset_id": "house",
+            "value_eur": 500000,
+            "insured": True,
             "premium_eur": 1200,
+            "coverage_limit_eur": 500000,
         },
         {
-            "asset_id": "art-collection",
-            "asset_value_eur": 150000,
-            "insured_value_eur": 50000,
-            "premium_eur": 300,
+            "asset_id": "art",
+            "value_eur": 75000,
+            "insured": False,
+            "premium_eur": 0,
+        },
+        {
+            "asset_id": "boat",
+            "value_eur": 90000,
+            "insured": True,
+            "premium_eur": 450,
+            "coverage_limit_eur": 60000,
         },
         {
             "asset_id": "jewelry",
-            "asset_value_eur": 20000,
-            "insured_value_eur": 0,
-            "premium_eur": 0,
+            "value_eur": 15000,
+            "insured": True,
+            "premium_eur": 80,
+            "coverage_limit_eur": 15000,
+            "excluded": True,
         },
     ]
     claims = [
         {"claim_id": "c1", "status": "open"},
         {"claim_id": "c2", "status": "closed"},
-        {"claim_id": "c3", "status": "open"},
+        {"claim_id": "c3", "status": "OPEN"},
     ]
 
-    report = build_insurance_report(assets, claims)
+    result = calculate_insurance_status(assets, claims)
 
-    assert report["insured_asset_value_eur"] == 550000.0
-    assert report["uninsured_asset_value_eur"] == 120000.0
-    assert report["premium_total_eur"] == 1500.0
-    assert report["open_claims_count"] == 2
-    assert report["auto_policy_actions"] == []
-    assert report["coverage_gaps"] == [
-        {"asset_id": "art-collection", "gap_value_eur": 100000.0},
-        {"asset_id": "jewelry", "gap_value_eur": 20000.0},
-    ]
-
-    path = write_report(assets, claims, output_dir=tmp_path, report_date=__import__("datetime").date(2026, 8, 1))
-    assert path.name == "df-150-2026-08-01.json"
-    assert path.exists()
+    assert result["insured_value_eur"] == 605000.0
+    assert result["uninsured_value_eur"] == 75000.0
+    assert result["premium_total_eur"] == 1730.0
+    assert result["open_claims_count"] == 2
+    assert result["coverage_gaps"] == ["art", "boat", "jewelry"]
 
 
-def test_evaluate_asset_rejects_overinsured_asset():
-    try:
-        evaluate_asset(
-            {
-                "asset_id": "bad-asset",
-                "asset_value_eur": 1000,
-                "insured_value_eur": 1001,
-                "premium_eur": 10,
-            }
-        )
-    except ValueError as exc:
-        assert "cannot exceed" in str(exc)
-    else:
-        raise AssertionError("Expected ValueError for overinsured asset")
+def test_negative_values_are_rejected():
+    assets = [{"asset_id": "bad", "value_eur": -1, "insured": True, "premium_eur": 10}]
+
+    import pytest
+
+    with pytest.raises(ValueError):
+        calculate_insurance_status(assets)
 

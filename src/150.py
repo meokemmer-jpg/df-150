@@ -1,97 +1,63 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from datetime import date
-from pathlib import Path
 from typing import Iterable, Mapping, Any
 
 
 @dataclass(frozen=True)
-class AssetCoverage:
+class AssetStatus:
     asset_id: str
-    asset_value_eur: float
-    insured_value_eur: float
+    value_eur: float
+    insured: bool
     premium_eur: float
     has_coverage_gap: bool
-    gap_value_eur: float
 
 
-def _to_float(value: Any, field_name: str) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field_name} must be numeric") from exc
-    if number < 0:
-        raise ValueError(f"{field_name} must be >= 0")
-    return round(number, 2)
+def _to_asset_status(asset: Mapping[str, Any]) -> AssetStatus:
+    asset_id = str(asset["asset_id"])
+    value_eur = float(asset.get("value_eur", 0.0))
+    insured = bool(asset.get("insured", False))
+    premium_eur = float(asset.get("premium_eur", 0.0))
 
+    if value_eur < 0 or premium_eur < 0:
+        raise ValueError("value_eur and premium_eur must be non-negative")
 
-def evaluate_asset(asset: Mapping[str, Any]) -> AssetCoverage:
-    asset_id = str(asset.get("asset_id", "")).strip()
-    if not asset_id:
-        raise ValueError("asset_id is required")
+    coverage_limit = asset.get("coverage_limit_eur")
+    excluded = bool(asset.get("excluded", False))
+    missing_policy = not insured
+    underinsured = insured and coverage_limit is not None and float(coverage_limit) < value_eur
+    has_coverage_gap = missing_policy or excluded or underinsured
 
-    asset_value = _to_float(asset.get("asset_value_eur", 0), "asset_value_eur")
-    insured_value = _to_float(asset.get("insured_value_eur", 0), "insured_value_eur")
-    premium = _to_float(asset.get("premium_eur", 0), "premium_eur")
-
-    if insured_value > asset_value:
-        raise ValueError("insured_value_eur cannot exceed asset_value_eur")
-
-    gap_value = round(asset_value - insured_value, 2)
-    return AssetCoverage(
+    return AssetStatus(
         asset_id=asset_id,
-        asset_value_eur=asset_value,
-        insured_value_eur=insured_value,
-        premium_eur=premium,
-        has_coverage_gap=gap_value > 0,
-        gap_value_eur=gap_value,
+        value_eur=value_eur,
+        insured=insured,
+        premium_eur=premium_eur,
+        has_coverage_gap=has_coverage_gap,
     )
 
 
-def build_insurance_report(
+def calculate_insurance_status(
     assets: Iterable[Mapping[str, Any]],
-    open_claims: Iterable[Mapping[str, Any]] = (),
+    claims: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
-    evaluated = [evaluate_asset(asset) for asset in assets]
+    asset_statuses = [_to_asset_status(asset) for asset in assets]
 
-    insured_total = round(sum(a.insured_value_eur for a in evaluated), 2)
-    uninsured_total = round(sum(a.gap_value_eur for a in evaluated), 2)
-    premium_total = round(sum(a.premium_eur for a in evaluated), 2)
-    open_claims_count = sum(1 for claim in open_claims if claim.get("status") == "open")
+    insured_value = sum(a.value_eur for a in asset_statuses if a.insured)
+    uninsured_value = sum(a.value_eur for a in asset_statuses if not a.insured)
+    premium_total = sum(a.premium_eur for a in asset_statuses)
 
-    coverage_gaps = [
-        {
-            "asset_id": a.asset_id,
-            "gap_value_eur": a.gap_value_eur,
-        }
-        for a in evaluated
-        if a.has_coverage_gap
-    ]
+    open_claims_count = sum(
+        1 for claim in claims if str(claim.get("status", "")).lower() == "open"
+    )
+
+    coverage_gaps = [a.asset_id for a in asset_statuses if a.has_coverage_gap]
 
     return {
-        "insured_asset_value_eur": insured_total,
-        "uninsured_asset_value_eur": uninsured_total,
-        "premium_total_eur": premium_total,
+        "insured_value_eur": round(insured_value, 2),
+        "uninsured_value_eur": round(uninsured_value, 2),
+        "premium_total_eur": round(premium_total, 2),
         "open_claims_count": open_claims_count,
         "coverage_gaps": coverage_gaps,
-        "auto_policy_actions": [],
     }
-
-
-def write_report(
-    assets: Iterable[Mapping[str, Any]],
-    open_claims: Iterable[Mapping[str, Any]] = (),
-    output_dir: str | Path = "reports",
-    report_date: date | None = None,
-) -> Path:
-    report = build_insurance_report(assets, open_claims)
-    report_date = report_date or date.today()
-
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-    file_path = output_path / f"df-150-{report_date.isoformat()}.json"
-    file_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
-    return file_path
 # [CRUX-MK]
