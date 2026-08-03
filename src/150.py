@@ -1,63 +1,107 @@
-from __future__ import annotations
+"""DF-150 KPM insurance coverage tracker.
+
+Read-only per-asset insurance status tracking. This module never buys or
+cancels policies.
+"""
 
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Any
+
+__all__ = [
+    "Asset",
+    "Policy",
+    "Claim",
+    "per_asset_status",
+    "coverage_summary",
+    "track_status",
+]
 
 
 @dataclass(frozen=True)
-class AssetStatus:
+class Asset:
     asset_id: str
-    value_eur: float
-    insured: bool
-    premium_eur: float
-    has_coverage_gap: bool
+    value: float
 
 
-def _to_asset_status(asset: Mapping[str, Any]) -> AssetStatus:
-    asset_id = str(asset["asset_id"])
-    value_eur = float(asset.get("value_eur", 0.0))
-    insured = bool(asset.get("insured", False))
-    premium_eur = float(asset.get("premium_eur", 0.0))
-
-    if value_eur < 0 or premium_eur < 0:
-        raise ValueError("value_eur and premium_eur must be non-negative")
-
-    coverage_limit = asset.get("coverage_limit_eur")
-    excluded = bool(asset.get("excluded", False))
-    missing_policy = not insured
-    underinsured = insured and coverage_limit is not None and float(coverage_limit) < value_eur
-    has_coverage_gap = missing_policy or excluded or underinsured
-
-    return AssetStatus(
-        asset_id=asset_id,
-        value_eur=value_eur,
-        insured=insured,
-        premium_eur=premium_eur,
-        has_coverage_gap=has_coverage_gap,
-    )
+@dataclass(frozen=True)
+class Policy:
+    policy_id: str
+    asset_id: str
+    insured_value: float
+    premium: float = 0.0
+    active: bool = True
 
 
-def calculate_insurance_status(
-    assets: Iterable[Mapping[str, Any]],
-    claims: Iterable[Mapping[str, Any]] = (),
-) -> dict[str, Any]:
-    asset_statuses = [_to_asset_status(asset) for asset in assets]
+@dataclass(frozen=True)
+class Claim:
+    claim_id: str
+    asset_id: str
+    status: str = "open"
 
-    insured_value = sum(a.value_eur for a in asset_statuses if a.insured)
-    uninsured_value = sum(a.value_eur for a in asset_statuses if not a.insured)
-    premium_total = sum(a.premium_eur for a in asset_statuses)
 
+def _is_open(claim: Claim) -> bool:
+    return claim.status.strip().lower() == "open"
+
+
+def per_asset_status(asset, policies=(), claims=()):
+    policies = tuple(policies)
+    claims = tuple(claims)
+
+    active_policies = [
+        p for p in policies
+        if p.asset_id == asset.asset_id and p.active
+    ]
+
+    asset_value = float(asset.value)
+    insured_value = float(sum(p.insured_value for p in active_policies))
+    uninsured_value = max(0.0, asset_value - insured_value)
     open_claims_count = sum(
-        1 for claim in claims if str(claim.get("status", "")).lower() == "open"
+        1 for c in claims
+        if c.asset_id == asset.asset_id and _is_open(c)
     )
 
-    coverage_gaps = [a.asset_id for a in asset_statuses if a.has_coverage_gap]
+    if insured_value <= 0.0:
+        coverage_status = "uninsured"
+    elif uninsured_value <= 0.0:
+        coverage_status = "insured"
+    else:
+        coverage_status = "partial"
 
     return {
-        "insured_value_eur": round(insured_value, 2),
-        "uninsured_value_eur": round(uninsured_value, 2),
-        "premium_total_eur": round(premium_total, 2),
+        "asset_id": asset.asset_id,
+        "asset_value": asset_value,
+        "insured_value": insured_value,
+        "uninsured_value": uninsured_value,
+        "premium_total": float(sum(p.premium for p in active_policies)),
         "open_claims_count": open_claims_count,
-        "coverage_gaps": coverage_gaps,
+        "coverage_gap": uninsured_value,
+        "coverage_status": coverage_status,
+        "policy_ids": [p.policy_id for p in active_policies],
     }
+
+
+def coverage_summary(assets, policies=(), claims=()):
+    policies = tuple(policies)
+    claims = tuple(claims)
+
+    rows = [per_asset_status(a, policies, claims) for a in assets]
+    gaps = [r for r in rows if r["coverage_gap"] > 0.0]
+
+    return {
+        "assets_count": len(rows),
+        "total_asset_value": float(sum(r["asset_value"] for r in rows)),
+        "total_insured_value": float(sum(r["insured_value"] for r in rows)),
+        "total_uninsured_value": float(sum(r["uninsured_value"] for r in rows)),
+        "premium_total": float(sum(r["premium_total"] for r in rows)),
+        "open_claims_count": sum(r["open_claims_count"] for r in rows),
+        "coverage_gap_total": float(sum(r["coverage_gap"] for r in gaps)),
+        "coverage_gap_assets": [
+            {"asset_id": r["asset_id"], "coverage_gap": r["coverage_gap"]}
+            for r in gaps
+        ],
+        "coverage_gap_asset_ids": [r["asset_id"] for r in gaps],
+        "per_asset_status": rows,
+    }
+
+
+track_status = coverage_summary
 # [CRUX-MK]
