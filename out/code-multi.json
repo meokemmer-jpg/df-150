@@ -1,6 +1,6 @@
 {
   "df": "df-150",
-  "ts": "2026-08-04T02:20:57.327482+00:00",
+  "ts": "2026-08-04T17:26:10.734900+00:00",
   "crux": "[CRUX-MK]",
   "winner_provider": "incumbent-kept",
   "winner_tests_passed": true,
@@ -24,8 +24,8 @@
       "tests_passed": true,
       "n_tests": 1,
       "n_assert": 6,
-      "coverage_pct": 100.0,
-      "q": 1509.0,
+      "coverage_pct": 87.0,
+      "q": 1444.0,
       "error": null
     },
     {
@@ -36,7 +36,7 @@
       "n_assert": 0,
       "coverage_pct": null,
       "q": null,
-      "error": "test parse: invalid decimal literal (<unknown>, line 73)"
+      "error": "test parse: invalid syntax (<unknown>, line 4)"
     }
   ],
   "canonical_verify": {
