@@ -1,6 +1,6 @@
 {
   "df": "df-150",
-  "ts": "2026-08-06T02:16:52.193920+00:00",
+  "ts": "2026-08-07T02:07:55.566452+00:00",
   "crux": "[CRUX-MK]",
   "winner_provider": "incumbent-kept",
   "winner_tests_passed": true,
@@ -22,21 +22,21 @@
       "provider": "codex",
       "parse_ok": true,
       "tests_passed": true,
-      "n_tests": 1,
-      "n_assert": 6,
-      "coverage_pct": 92.0,
-      "q": 1469.0,
+      "n_tests": 2,
+      "n_assert": 7,
+      "coverage_pct": 89.0,
+      "q": 1458.0,
       "error": null
     },
     {
       "provider": "local",
       "parse_ok": true,
       "tests_passed": false,
-      "n_tests": 30,
-      "n_assert": 56,
+      "n_tests": 0,
+      "n_assert": 0,
       "coverage_pct": null,
-      "q": 1.0,
-      "error": null
+      "q": null,
+      "error": "test parse: invalid syntax (<unknown>, line 4)"
     }
   ],
   "canonical_verify": {
