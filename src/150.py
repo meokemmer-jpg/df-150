@@ -1,141 +1,101 @@
-#!/usr/bin/env python3
-"""DF-150 KPM-Insurance-Coverage [CRUX-MK] - Per-Asset-Insurance-Status-Tracking.
+"""Insurance Coverage Tracker (df-150) - stdlib only"""
 
-Constraints:
-  - NEVER auto-buy or auto-cancel policies.
-  - This module only records and reports insurance coverage status.
-"""
-
-import json
-from dataclasses import dataclass, field
-from datetime import date
-from pathlib import Path
-from typing import Dict, List, Optional
-
-
-@dataclass
-class Asset:
-    asset_id: str
-    value_eur: float
-    insured: bool = False
-    premium_eur: float = 0.0
-
-    def __post_init__(self) -> None:
-        if self.value_eur < 0:
-            raise ValueError("value_eur must be >= 0")
-        if self.premium_eur < 0:
-            raise ValueError("premium_eur must be >= 0")
-        if not self.insured and self.premium_eur != 0.0:
-            raise ValueError("an uninsured asset cannot carry a premium")
-
-
-@dataclass
 class InsuranceTracker:
-    assets: Dict[str, Asset] = field(default_factory=dict)
-    _open_claims: int = 0
+    """Track insured/uninsured asset values, premiums, claims, and coverage gaps."""
 
-    def add_asset(
-        self,
-        asset_id: str,
-        value_eur: float,
-        insured: bool = False,
-        premium_eur: float = 0.0,
-    ) -> Asset:
-        """Register an asset with its current insurance status."""
-        if not asset_id:
-            raise ValueError("asset_id must not be empty")
-        if asset_id in self.assets:
-            raise KeyError(f"asset {asset_id!r} already exists")
-        asset = Asset(
-            asset_id=asset_id,
-            value_eur=value_eur,
-            insured=insured,
-            premium_eur=premium_eur,
-        )
-        self.assets[asset_id] = asset
-        return asset
+    def __init__(self):
+        self._assets = []   # list of dicts: id, name, value, insured_amount, premium
+        self._claims = []   # list of dicts: id, asset_id, amount, status
 
-    def record_insurance_status(
-        self, asset_id: str, insured: bool, premium_eur: float = 0.0
-    ) -> None:
-        """Manually record a policy status change. No automatic buy/cancel."""
-        if asset_id not in self.assets:
-            raise KeyError(f"unknown asset {asset_id!r}")
-        if premium_eur < 0:
-            raise ValueError("premium_eur must be >= 0")
-        if not insured and premium_eur != 0.0:
-            raise ValueError("an uninsured asset cannot carry a premium")
-        asset = self.assets[asset_id]
-        asset.insured = insured
-        asset.premium_eur = premium_eur if insured else 0.0
+    def _get_asset(self, asset_id):
+        """Return asset dict by id or raise KeyError."""
+        for a in self._assets:
+            if a['id'] == asset_id:
+                return a
+        raise KeyError(f'Asset {asset_id!r} not found')
 
-    def register_claim(self, count: int = 1) -> None:
-        if count < 0:
-            raise ValueError("count must be >= 0")
-        self._open_claims += count
+    def add_asset(self, asset_id, name, value):
+        """Register a new asset with zero insurance and premium."""
+        if any(a['id'] == asset_id for a in self._assets):
+            raise ValueError(f'Asset {asset_id!r} already exists')
+        self._assets.append({
+            'id': asset_id,
+            'name': name,
+            'value': value,
+            'insured_amount': 0.0,
+            'premium': 0.0,
+        })
 
-    def settle_claim(self, count: int = 1) -> None:
-        if count < 0:
-            raise ValueError("count must be >= 0")
-        self._open_claims = max(0, self._open_claims - count)
+    def set_insured_amount(self, asset_id, amount):
+        """Update insured amount; cannot exceed asset value."""
+        asset = self._get_asset(asset_id)
+        if amount < 0:
+            raise ValueError('Insured amount cannot be negative')
+        if amount > asset['value']:
+            raise ValueError('Insured amount cannot exceed asset value')
+        asset['insured_amount'] = amount
+
+    def set_premium(self, asset_id, premium):
+        """Set the premium for an asset's policy."""
+        asset = self._get_asset(asset_id)
+        if premium < 0:
+            raise ValueError('Premium cannot be negative')
+        asset['premium'] = premium
+
+    def add_claim(self, claim_id, asset_id, amount):
+        """File a new open claim against an asset."""
+        self._get_asset(asset_id)  # ensure asset exists
+        if any(c['id'] == claim_id for c in self._claims):
+            raise ValueError(f'Claim {claim_id!r} already exists')
+        self._claims.append({
+            'id': claim_id,
+            'asset_id': asset_id,
+            'amount': amount,
+            'status': 'open',
+        })
+
+    def close_claim(self, claim_id):
+        """Close an open claim."""
+        for claim in self._claims:
+            if claim['id'] == claim_id:
+                if claim['status'] != 'open':
+                    raise ValueError(f'Claim {claim_id!r} is not open')
+                claim['status'] = 'closed'
+                return
+        raise KeyError(f'Claim {claim_id!r} not found')
 
     @property
-    def open_claims_count(self) -> int:
-        return self._open_claims
+    def insured_value(self):
+        """Total insured value across all assets (EUR)."""
+        return sum(a['insured_amount'] for a in self._assets)
 
-    def insured_value_eur(self) -> float:
-        return sum(a.value_eur for a in self.assets.values() if a.insured)
+    @property
+    def uninsured_value(self):
+        """Total uninsured value (asset value minus insured amount) across all assets (EUR)."""
+        return sum(a['value'] - a['insured_amount'] for a in self._assets)
 
-    def uninsured_value_eur(self) -> float:
-        return sum(a.value_eur for a in self.assets.values() if not a.insured)
+    @property
+    def total_premium(self):
+        """Sum of all premiums (EUR)."""
+        return sum(a['premium'] for a in self._assets)
 
-    def premium_total_eur(self) -> float:
-        return sum(a.premium_eur for a in self.assets.values() if a.insured)
+    @property
+    def open_claims_count(self):
+        """Number of claims currently open."""
+        return sum(1 for c in self._claims if c['status'] == 'open')
 
-    def coverage_gaps(self) -> List[str]:
-        """Return IDs of uninsured assets with positive value."""
-        return [
-            a.asset_id
-            for a in self.assets.values()
-            if not a.insured and a.value_eur > 0
-        ]
+    @property
+    def coverage_gap_count(self):
+        """Number of assets where insured_amount < asset value."""
+        return sum(1 for a in self._assets if a['insured_amount'] < a['value'])
 
-    def asset_statuses(self) -> List[dict]:
-        return [
-            {
-                "asset_id": a.asset_id,
-                "value_eur": a.value_eur,
-                "insured": a.insured,
-                "premium_eur": a.premium_eur,
-            }
-            for a in self.assets.values()
-        ]
-
-    def report(self) -> dict:
+    def report(self):
+        """Return a dictionary with all key metrics."""
         return {
-            "insured_value_eur": self.insured_value_eur(),
-            "uninsured_value_eur": self.uninsured_value_eur(),
-            "premium_total_eur": self.premium_total_eur(),
-            "open_claims_count": self.open_claims_count,
-            "coverage_gaps": self.coverage_gaps(),
-            "assets": self.asset_statuses(),
+            'insured_value': self.insured_value,
+            'uninsured_value': self.uninsured_value,
+            'total_premium': self.total_premium,
+            'open_claims_count': self.open_claims_count,
+            'coverage_gap_count': self.coverage_gap_count,
         }
-
-    def write_report(self, path: Optional[Path] = None) -> Path:
-        target = (
-            Path(path)
-            if path is not None
-            else Path("reports") / f"df-150-{date.today().isoformat()}.json"
-        )
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(self.report(), indent=2), encoding="utf-8")
-        return target
-
-
-if __name__ == "__main__":
-    tracker = InsuranceTracker()
-    tracker.add_asset("DE0001", 100_000.0)
-    tracker.add_asset("DE0002", 250_000.0, insured=True, premium_eur=1_250.0)
-    tracker.add_asset("DE0003", 50_000.0)
-    print(json.dumps(tracker.report(), indent=2))
 # [CRUX-MK]

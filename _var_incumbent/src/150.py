@@ -1,85 +1,101 @@
-from __future__ import annotations
+"""Insurance Coverage Tracker (df-150) - stdlib only"""
 
-from typing import Any, Dict, Iterable, List
+class InsuranceTracker:
+    """Track insured/uninsured asset values, premiums, claims, and coverage gaps."""
 
+    def __init__(self):
+        self._assets = []   # list of dicts: id, name, value, insured_amount, premium
+        self._claims = []   # list of dicts: id, asset_id, amount, status
 
-def summarize_insurance_status(
-    assets: Iterable[Dict[str, Any]], claims: Iterable[Dict[str, Any]] | None = None
-) -> Dict[str, Any]:
-    """
-    Summarize per-asset insurance status for KPM coverage tracking.
+    def _get_asset(self, asset_id):
+        """Return asset dict by id or raise KeyError."""
+        for a in self._assets:
+            if a['id'] == asset_id:
+                return a
+        raise KeyError(f'Asset {asset_id!r} not found')
 
-    Expected asset fields:
-    - name: str
-    - value_eur: number >= 0
-    - insured_value_eur: number >= 0 (optional, default 0)
-    - premium_eur: number >= 0 (optional, default 0)
-    - coverage_required: bool (optional, default True)
+    def add_asset(self, asset_id, name, value):
+        """Register a new asset with zero insurance and premium."""
+        if any(a['id'] == asset_id for a in self._assets):
+            raise ValueError(f'Asset {asset_id!r} already exists')
+        self._assets.append({
+            'id': asset_id,
+            'name': name,
+            'value': value,
+            'insured_amount': 0.0,
+            'premium': 0.0,
+        })
 
-    Expected claim fields:
-    - status: str, counted as open when equal to "open" (case-insensitive)
-    """
-    asset_rows: List[Dict[str, Any]] = []
-    insured_total = 0.0
-    uninsured_total = 0.0
-    premium_total = 0.0
-    coverage_gaps: List[Dict[str, Any]] = []
+    def set_insured_amount(self, asset_id, amount):
+        """Update insured amount; cannot exceed asset value."""
+        asset = self._get_asset(asset_id)
+        if amount < 0:
+            raise ValueError('Insured amount cannot be negative')
+        if amount > asset['value']:
+            raise ValueError('Insured amount cannot exceed asset value')
+        asset['insured_amount'] = amount
 
-    for asset in assets:
-        name = str(asset["name"])
-        value = _as_non_negative_float(asset.get("value_eur", 0), "value_eur")
-        insured_value = _as_non_negative_float(
-            asset.get("insured_value_eur", 0), "insured_value_eur"
-        )
-        premium = _as_non_negative_float(asset.get("premium_eur", 0), "premium_eur")
-        coverage_required = bool(asset.get("coverage_required", True))
+    def set_premium(self, asset_id, premium):
+        """Set the premium for an asset's policy."""
+        asset = self._get_asset(asset_id)
+        if premium < 0:
+            raise ValueError('Premium cannot be negative')
+        asset['premium'] = premium
 
-        covered = min(value, insured_value)
-        uninsured = max(0.0, value - covered)
+    def add_claim(self, claim_id, asset_id, amount):
+        """File a new open claim against an asset."""
+        self._get_asset(asset_id)  # ensure asset exists
+        if any(c['id'] == claim_id for c in self._claims):
+            raise ValueError(f'Claim {claim_id!r} already exists')
+        self._claims.append({
+            'id': claim_id,
+            'asset_id': asset_id,
+            'amount': amount,
+            'status': 'open',
+        })
 
-        insured_total += covered
-        uninsured_total += uninsured
-        premium_total += premium
+    def close_claim(self, claim_id):
+        """Close an open claim."""
+        for claim in self._claims:
+            if claim['id'] == claim_id:
+                if claim['status'] != 'open':
+                    raise ValueError(f'Claim {claim_id!r} is not open')
+                claim['status'] = 'closed'
+                return
+        raise KeyError(f'Claim {claim_id!r} not found')
 
-        gap = coverage_required and uninsured > 0
-        if gap:
-            coverage_gaps.append(
-                {
-                    "asset": name,
-                    "uninsured_value_eur": round(uninsured, 2),
-                }
-            )
+    @property
+    def insured_value(self):
+        """Total insured value across all assets (EUR)."""
+        return sum(a['insured_amount'] for a in self._assets)
 
-        asset_rows.append(
-            {
-                "asset": name,
-                "value_eur": round(value, 2),
-                "insured_value_eur": round(covered, 2),
-                "uninsured_value_eur": round(uninsured, 2),
-                "premium_eur": round(premium, 2),
-                "has_coverage_gap": gap,
-            }
-        )
+    @property
+    def uninsured_value(self):
+        """Total uninsured value (asset value minus insured amount) across all assets (EUR)."""
+        return sum(a['value'] - a['insured_amount'] for a in self._assets)
 
-    open_claims_count = 0
-    for claim in claims or ():
-        if str(claim.get("status", "")).strip().lower() == "open":
-            open_claims_count += 1
+    @property
+    def total_premium(self):
+        """Sum of all premiums (EUR)."""
+        return sum(a['premium'] for a in self._assets)
 
-    return {
-        "insured_asset_value_eur": round(insured_total, 2),
-        "uninsured_asset_value_eur": round(uninsured_total, 2),
-        "premium_total_eur": round(premium_total, 2),
-        "open_claims_count": open_claims_count,
-        "coverage_gaps": coverage_gaps,
-        "assets": asset_rows,
-        "auto_policy_actions": [],
-    }
+    @property
+    def open_claims_count(self):
+        """Number of claims currently open."""
+        return sum(1 for c in self._claims if c['status'] == 'open')
 
+    @property
+    def coverage_gap_count(self):
+        """Number of assets where insured_amount < asset value."""
+        return sum(1 for a in self._assets if a['insured_amount'] < a['value'])
 
-def _as_non_negative_float(value: Any, field_name: str) -> float:
-    number = float(value)
-    if number < 0:
-        raise ValueError(f"{field_name} must be >= 0")
-    return number
+    def report(self):
+        """Return a dictionary with all key metrics."""
+        return {
+            'insured_value': self.insured_value,
+            'uninsured_value': self.uninsured_value,
+            'total_premium': self.total_premium,
+            'open_claims_count': self.open_claims_count,
+            'coverage_gap_count': self.coverage_gap_count,
+        }
 # [CRUX-MK]
