@@ -1,97 +1,145 @@
-"""df-150 KPM insurance coverage tracking.
+"""DF-150 KPM Insurance Coverage Tracker (stdlib only).
 
-This module is deliberately read-only with respect to insurance policies:
-it NEVER buys or cancels a policy. It only derives aggregate status from
-the supplied assets, policies, and claims.
+Tracks per-asset insured/uninsured values, premium totals, open claims count
+and coverage gaps. Never auto-buys or auto-cancels policies.
 """
-
-from dataclasses import dataclass
-from typing import List, Sequence, Set, Tuple
-
-AUTO_POLICY_BUY_OR_CANCEL_ENABLED = False
+from typing import Any, Dict, List, Optional
+import itertools
 
 
-@dataclass(frozen=True)
-class Asset:
-    asset_id: str
-    value_eur: float
+def _validate_nonnegative(value: float, field_name: str) -> None:
+    if value < 0:
+        raise ValueError(f"{field_name} must be non-negative")
 
 
-@dataclass(frozen=True)
-class Policy:
-    policy_id: str
-    asset_id: str
-    premium_eur: float
-    active: bool = True
+class InsuranceTracker:
+    """Tracks assets, insurance coverage, premiums, claims and coverage gaps."""
 
+    def __init__(self) -> None:
+        self.assets: Dict[str, Dict[str, Any]] = {}
+        self.claims: Dict[str, Dict[str, Any]] = {}
+        self._claim_counter = itertools.count(1)
 
-@dataclass(frozen=True)
-class Claim:
-    claim_id: str
-    asset_id: str
-    status: str = "OPEN"
+    def add_asset(
+        self,
+        asset_id: str,
+        name: str,
+        value_eur: float,
+        insured_value_eur: float = 0.0,
+        premium_eur: float = 0.0,
+    ) -> str:
+        """Add a new asset with its current insurance data."""
+        if asset_id in self.assets:
+            raise ValueError(f"Asset '{asset_id}' already exists")
+        _validate_nonnegative(value_eur, "value_eur")
+        _validate_nonnegative(insured_value_eur, "insured_value_eur")
+        _validate_nonnegative(premium_eur, "premium_eur")
+        if insured_value_eur > value_eur:
+            raise ValueError("insured_value_eur cannot exceed value_eur")
 
+        self.assets[asset_id] = {
+            "name": name,
+            "value_eur": float(value_eur),
+            "insured_value_eur": float(insured_value_eur),
+            "premium_eur": float(premium_eur),
+        }
+        return asset_id
 
-@dataclass(frozen=True)
-class InsuranceStatusReport:
-    insured_value_eur: float
-    uninsured_value_eur: float
-    premium_total_eur: float
-    open_claims_count: int
-    coverage_gaps: List[Asset]
+    def update_insurance(
+        self,
+        asset_id: str,
+        insured_value_eur: Optional[float] = None,
+        premium_eur: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Manually update an asset's insured value or premium."""
+        asset = self._get_asset(asset_id)
 
+        if insured_value_eur is not None:
+            _validate_nonnegative(insured_value_eur, "insured_value_eur")
+            if insured_value_eur > asset["value_eur"]:
+                raise ValueError("insured_value_eur cannot exceed value_eur")
+        if premium_eur is not None:
+            _validate_nonnegative(premium_eur, "premium_eur")
 
-def _active_policies(policies: Sequence[Policy]) -> List[Policy]:
-    return [p for p in policies if p.active]
+        if insured_value_eur is not None:
+            asset["insured_value_eur"] = float(insured_value_eur)
+        if premium_eur is not None:
+            asset["premium_eur"] = float(premium_eur)
 
+        return asset
 
-def insured_asset_ids(policies: Sequence[Policy]) -> Set[str]:
-    return {p.asset_id for p in _active_policies(policies)}
+    def add_claim(
+        self,
+        asset_id: str,
+        amount_eur: float,
+        claim_id: Optional[str] = None,
+    ) -> str:
+        """Register a new open claim for an asset."""
+        self._get_asset(asset_id)
+        _validate_nonnegative(amount_eur, "amount_eur")
 
+        if claim_id is None:
+            claim_id = f"CL-{next(self._claim_counter)}"
+        if claim_id in self.claims:
+            raise ValueError(f"Claim '{claim_id}' already exists")
 
-def compute_insured_uninsured(
-    assets: Sequence[Asset], policies: Sequence[Policy]
-) -> Tuple[float, float]:
-    insured_ids = insured_asset_ids(policies)
-    insured_value = 0.0
-    uninsured_value = 0.0
+        self.claims[claim_id] = {
+            "asset_id": asset_id,
+            "amount_eur": float(amount_eur),
+            "open": True,
+        }
+        return claim_id
 
-    for asset in assets:
-        if asset.asset_id in insured_ids:
-            insured_value += asset.value_eur
-        else:
-            uninsured_value += asset.value_eur
+    def close_claim(self, claim_id: str) -> str:
+        """Mark a claim as closed."""
+        self._get_claim(claim_id)["open"] = False
+        return claim_id
 
-    return insured_value, uninsured_value
+    def get_asset_status(self, asset_id: str) -> Dict[str, Any]:
+        """Return per-asset insurance status."""
+        asset = self._get_asset(asset_id)
+        return {
+            "asset_id": asset_id,
+            "name": asset["name"],
+            "value_eur": asset["value_eur"],
+            "insured_value_eur": asset["insured_value_eur"],
+            "uninsured_value_eur": asset["value_eur"] - asset["insured_value_eur"],
+            "premium_eur": asset["premium_eur"],
+        }
 
+    def coverage_gaps(self) -> List[Dict[str, Any]]:
+        """Return all assets where insured value is below asset value."""
+        gaps = []
+        for asset_id in sorted(self.assets):
+            asset = self.assets[asset_id]
+            gap = asset["value_eur"] - asset["insured_value_eur"]
+            if gap > 0:
+                gaps.append({"asset_id": asset_id, "gap_eur": gap})
+        return gaps
 
-def compute_premium_total(policies: Sequence[Policy]) -> float:
-    return float(sum(p.premium_eur for p in _active_policies(policies)))
+    def status(self) -> Dict[str, Any]:
+        """Return aggregate KPM insurance tracking status."""
+        total_value = sum(asset["value_eur"] for asset in self.assets.values())
+        insured_value = sum(asset["insured_value_eur"] for asset in self.assets.values())
+        premium_total = sum(asset["premium_eur"] for asset in self.assets.values())
+        open_claims_count = sum(1 for claim in self.claims.values() if claim["open"])
 
+        return {
+            "total_value_eur": total_value,
+            "insured_value_eur": insured_value,
+            "uninsured_value_eur": total_value - insured_value,
+            "premium_total_eur": premium_total,
+            "open_claims_count": open_claims_count,
+            "coverage_gaps": self.coverage_gaps(),
+        }
 
-def count_open_claims(claims: Sequence[Claim]) -> int:
-    return sum(1 for claim in claims if str(claim.status).upper() == "OPEN")
+    def _get_asset(self, asset_id: str) -> Dict[str, Any]:
+        if asset_id not in self.assets:
+            raise KeyError(f"Unknown asset '{asset_id}'")
+        return self.assets[asset_id]
 
-
-def find_coverage_gaps(
-    assets: Sequence[Asset], policies: Sequence[Policy]
-) -> List[Asset]:
-    insured_ids = insured_asset_ids(policies)
-    return [asset for asset in assets if asset.asset_id not in insured_ids]
-
-
-def build_status_report(
-    assets: Sequence[Asset],
-    policies: Sequence[Policy],
-    claims: Sequence[Claim],
-) -> InsuranceStatusReport:
-    insured_value, uninsured_value = compute_insured_uninsured(assets, policies)
-
-    return InsuranceStatusReport(
-        insured_value_eur=insured_value,
-        uninsured_value_eur=uninsured_value,
-        premium_total_eur=compute_premium_total(policies),
-        open_claims_count=count_open_claims(claims),
-        coverage_gaps=find_coverage_gaps(assets, policies),
-    )
+    def _get_claim(self, claim_id: str) -> Dict[str, Any]:
+        if claim_id not in self.claims:
+            raise KeyError(f"Unknown claim '{claim_id}'")
+        return self.claims[claim_id]
 # [CRUX-MK]

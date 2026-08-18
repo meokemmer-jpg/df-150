@@ -1,94 +1,74 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 # [CRUX-MK]
+# Hinweis: `from 150 import ...` ist als Python-Syntax nicht gültig,
+# weil Modulnamen nicht mit einer Ziffer beginnen dürfen.
+# Das Modul "150.py" wird daher per importlib geladen.
+import importlib
 import sys
 from pathlib import Path
-from importlib import import_module
 
 import pytest
 
-# The literal `from 150 import ...` is invalid Python 3 syntax because module
-# names cannot start with a digit.  importlib is the stdlib-compliant equivalent.
-_HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(_HERE))
-sys.path.insert(0, str(_HERE.parent))
+try:
+    m = importlib.import_module("150")
+except ModuleNotFoundError:
+    # Beim pytest-Lauf aus dem Projektroot ggf. den Root-Pfad ergänzen.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    m = importlib.import_module("150")
 
-_150 = import_module("150")
-
-Asset = _150.Asset
-Policy = _150.Policy
-Claim = _150.Claim
-compute_insured_uninsured = _150.compute_insured_uninsured
-compute_premium_total = _150.compute_premium_total
-count_open_claims = _150.count_open_claims
-find_coverage_gaps = _150.find_coverage_gaps
-build_status_report = _150.build_status_report
+InsuranceTracker = m.InsuranceTracker
 
 
-def _sample_data():
-    assets = [
-        Asset(asset_id="villa", value_eur=500_000.0),
-        Asset(asset_id="yacht", value_eur=300_000.0),
-        Asset(asset_id="jewelry", value_eur=200_000.0),
-    ]
-    policies = [
-        Policy(policy_id="pol-1", asset_id="villa", premium_eur=1_200.0, active=True),
-        Policy(policy_id="pol-2", asset_id="yacht", premium_eur=900.0, active=False),
-        Policy(policy_id="pol-3", asset_id="jewelry", premium_eur=650.0, active=True),
-    ]
-    claims = [
-        Claim(claim_id="claim-1", asset_id="villa", status="OPEN"),
-        Claim(claim_id="claim-2", asset_id="villa", status="closed"),
-        Claim(claim_id="claim-3", asset_id="jewelry", status="Open"),
-    ]
-    return assets, policies, claims
+def test_asset_insurance_status_tracking():
+    tracker = InsuranceTracker()
+    tracker.add_asset("A1", "Villa", 100_000, insured_value_eur=80_000, premium_eur=1_200)
+    tracker.add_asset("A2", "Wertpapiere", 50_000, insured_value_eur=50_000, premium_eur=800)
+
+    status = tracker.status()
+    assert status["total_value_eur"] == 150_000
+    assert status["insured_value_eur"] == 130_000
+    assert status["uninsured_value_eur"] == 20_000
+    assert status["premium_total_eur"] == 2_000
+    assert status["open_claims_count"] == 0
+    assert status["coverage_gaps"] == [{"asset_id": "A1", "gap_eur": 20_000}]
+
+    tracker.update_insurance("A1", insured_value_eur=90_000, premium_eur=1_500)
+
+    status = tracker.status()
+    assert status["insured_value_eur"] == 140_000
+    assert status["uninsured_value_eur"] == 10_000
+    assert status["premium_total_eur"] == 2_300
+    assert status["coverage_gaps"] == [{"asset_id": "A1", "gap_eur": 10_000}]
+
+    c1 = tracker.add_claim("A1", 5_000)
+    c2 = tracker.add_claim("A2", 3_000)
+    assert tracker.status()["open_claims_count"] == 2
+
+    tracker.close_claim(c1)
+    assert tracker.status()["open_claims_count"] == 1
+
+    a1 = tracker.get_asset_status("A1")
+    assert a1["value_eur"] == 100_000
+    assert a1["insured_value_eur"] == 90_000
+    assert a1["uninsured_value_eur"] == 10_000
+    assert a1["premium_eur"] == 1_500
 
 
-def test_insured_uninsured_values():
-    assets, policies, _ = _sample_data()
-    insured_value, uninsured_value = compute_insured_uninsured(assets, policies)
+def test_no_auto_policy_buy_or_cancel_and_validation():
+    tracker = InsuranceTracker()
+    tracker.add_asset("A3", "Lager", 10_000, insured_value_eur=10_000, premium_eur=100)
 
-    assert insured_value == pytest.approx(700_000.0)
-    assert uninsured_value == pytest.approx(300_000.0)
+    with pytest.raises(ValueError):
+        tracker.update_insurance("A3", insured_value_eur=11_000)
 
+    with pytest.raises(ValueError):
+        tracker.update_insurance("A3", premium_eur=-1)
 
-def test_premium_total_uses_active_policies_only():
-    _, policies, _ = _sample_data()
+    with pytest.raises(KeyError):
+        tracker.add_claim("NOPE", 100)
 
-    assert compute_premium_total(policies) == pytest.approx(1_850.0)
-
-
-def test_open_claims_count_is_case_insensitive():
-    _, _, claims = _sample_data()
-
-    assert count_open_claims(claims) == 2
-
-
-def test_find_coverage_gaps():
-    assets, policies, _ = _sample_data()
-    gap_ids = [gap.asset_id for gap in find_coverage_gaps(assets, policies)]
-
-    assert gap_ids == ["yacht"]
-
-
-def test_build_status_report():
-    assets, policies, claims = _sample_data()
-    report = build_status_report(assets, policies, claims)
-
-    assert report.insured_value_eur == pytest.approx(700_000.0)
-    assert report.uninsured_value_eur == pytest.approx(300_000.0)
-    assert report.premium_total_eur == pytest.approx(1_850.0)
-    assert report.open_claims_count == 2
-    assert [gap.asset_id for gap in report.coverage_gaps] == ["yacht"]
-
-
-def test_no_auto_policy_buy_or_cancel():
-    assets, policies, claims = _sample_data()
-    active_before = [policy.active for policy in policies]
-
-    build_status_report(assets, policies, claims)
-
-    assert [policy.active for policy in policies] == active_before
-    assert _150.AUTO_POLICY_BUY_OR_CANCEL_ENABLED is False
-    assert not hasattr(_150, "buy_policy")
-    assert not hasattr(_150, "cancel_policy")
+    # Keine automatische Policy-Änderung: Der Bestand bleibt unverändert.
+    a3 = tracker.get_asset_status("A3")
+    assert a3["insured_value_eur"] == 10_000
+    assert a3["premium_eur"] == 100
