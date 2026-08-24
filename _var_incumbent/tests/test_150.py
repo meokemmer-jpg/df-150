@@ -2,68 +2,82 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 # [CRUX-MK]
 import importlib
-import json
 
-m150 = importlib.import_module("150")
-calculate_insurance_status = m150.calculate_insurance_status
-build_report = m150.build_report
-write_report = m150.write_report
+insurance_module = importlib.import_module("150")
+build_insurance_report = insurance_module.build_insurance_report
+evaluate_asset_coverage = insurance_module.evaluate_asset_coverage
+report_to_json = insurance_module.report_to_json
 
 
-def test_kpm_insurance_status_and_report_output(tmp_path):
-    assets = [
+def test_evaluate_asset_coverage_caps_and_detects_gap():
+    result = evaluate_asset_coverage(
         {
-            "name": "Primary Residence",
-            "value_eur": 100000,
-            "insured_value_eur": 80000,
-            "premium_eur": 500,
+            "asset_id": "A-1",
+            "asset_name": "Family Home",
+            "asset_value_eur": 500000,
+            "insured_value_eur": 550000,
+            "premium_eur": 1200.456,
             "open_claims_count": 1,
-            "coverage_required": True,
-        },
-        {
-            "name": "Art Collection",
-            "value_eur": 40000,
-            "insured_value_eur": 0,
-            "premium_eur": 0,
-            "open_claims_count": 0,
-            "coverage_required": True,
-        },
-        {
-            "name": "Family Car",
-            "value_eur": 25000,
-            "insured_value_eur": 25000,
-            "premium_eur": 900,
-            "open_claims_count": 2,
-            "coverage_required": True,
-        },
-    ]
-
-    status = calculate_insurance_status(assets)
-
-    assert status["insured_asset_value_eur"] == 105000.0
-    assert status["uninsured_asset_value_eur"] == 60000.0
-    assert status["premium_total_eur"] == 1400.0
-    assert status["open_claims_count"] == 3
-    assert len(status["coverage_gaps"]) == 2
-    assert status["coverage_gaps"][0]["asset"] == "Primary Residence"
-    assert status["coverage_gaps"][0]["reason"] == "underinsured"
-    assert status["coverage_gaps"][0]["gap_value_eur"] == 20000.0
-    assert status["coverage_gaps"][1]["asset"] == "Art Collection"
-    assert status["coverage_gaps"][1]["reason"] == "uninsured"
-    assert status["coverage_gaps"][1]["gap_value_eur"] == 40000.0
-
-    report = build_report(assets, report_date="2026-08-22", stop_flag_path=tmp_path / "df-150.stop")
-    assert report["report_date"] == "2026-08-22"
-    assert report["stop_requested"] is False
-
-    written = write_report(
-        assets,
-        report_dir=tmp_path / "reports",
-        report_date="2026-08-22",
-        stop_flag_path=tmp_path / "df-150.stop",
+        }
     )
-    assert written.name == "df-150-2026-08-22.json"
 
-    payload = json.loads(written.read_text(encoding="utf-8"))
-    assert payload == report
+    assert result.asset_value_eur == 500000.0
+    assert result.insured_value_eur == 500000.0
+    assert result.coverage_gap_eur == 0.0
+    assert result.insured is True
+    assert result.premium_eur == 1200.46
+    assert result.open_claims_count == 1
+
+
+def test_build_insurance_report_aggregates_totals_and_gaps():
+    report = build_insurance_report(
+        [
+            {
+                "asset_id": "A-1",
+                "asset_name": "Family Home",
+                "asset_value_eur": 500000,
+                "insured_value_eur": 500000,
+                "premium_eur": 1200,
+                "open_claims_count": 1,
+            },
+            {
+                "asset_id": "A-2",
+                "asset_name": "Art Collection",
+                "asset_value_eur": 80000,
+                "insured_value_eur": 30000,
+                "premium_eur": 250,
+                "open_claims_count": 0,
+            },
+            {
+                "asset_id": "A-3",
+                "asset_name": "Jewelry",
+                "asset_value_eur": 20000,
+                "insured_value_eur": 0,
+                "premium_eur": 0,
+                "open_claims_count": 2,
+            },
+        ],
+        report_date="2026-08-23",
+    )
+
+    assert report["report_date"] == "2026-08-23"
+    assert report["totals"] == {
+        "asset_value_eur": 600000.0,
+        "insured_value_eur": 530000.0,
+        "uninsured_value_eur": 70000.0,
+        "premium_total_eur": 1450.0,
+        "open_claims_count": 3,
+    }
+    assert report["coverage_gaps"] == [
+        {"asset_id": "A-2", "asset_name": "Art Collection", "gap_eur": 50000.0},
+        {"asset_id": "A-3", "asset_name": "Jewelry", "gap_eur": 20000.0},
+    ]
+    assert report["policy_actions"] == {
+        "auto_policy_buy": False,
+        "auto_policy_cancel": False,
+    }
+
+    payload = report_to_json(report)
+    assert '"report_date": "2026-08-23"' in payload
+    assert '"auto_policy_buy": false' in payload
 

@@ -1,21 +1,21 @@
 {
   "df": "df-150",
-  "ts": "2026-08-23T02:52:34.716448+00:00",
+  "ts": "2026-08-24T02:12:16.525461+00:00",
   "crux": "[CRUX-MK]",
   "winner_provider": "incumbent-kept",
   "winner_tests_passed": true,
-  "incumbent_q": 1503.0,
-  "winner_q": 1503.0,
+  "incumbent_q": 1518.0,
+  "winner_q": 1518.0,
   "improved": false,
   "variants": [
     {
       "provider": "incumbent",
       "parse_ok": true,
       "tests_passed": true,
-      "n_tests": 1,
-      "n_assert": 15,
-      "coverage_pct": 97.0,
-      "q": 1503.0,
+      "n_tests": 2,
+      "n_assert": 12,
+      "coverage_pct": 100.0,
+      "q": 1518.0,
       "error": null
     },
     {
@@ -23,9 +23,9 @@
       "parse_ok": true,
       "tests_passed": true,
       "n_tests": 2,
-      "n_assert": 7,
-      "coverage_pct": 88.0,
-      "q": 1453.0,
+      "n_assert": 6,
+      "coverage_pct": 85.0,
+      "q": 1437.0,
       "error": null
     },
     {
