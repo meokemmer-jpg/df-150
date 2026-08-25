@@ -1,6 +1,6 @@
 {
   "df": "df-150",
-  "ts": "2026-08-24T02:53:12.531373+00:00",
+  "ts": "2026-08-25T01:44:04.481185+00:00",
   "crux": "[CRUX-MK]",
   "winner_provider": "incumbent-kept",
   "winner_tests_passed": true,
@@ -20,13 +20,13 @@
     },
     {
       "provider": "codex",
-      "parse_ok": true,
-      "tests_passed": true,
-      "n_tests": 1,
-      "n_assert": 5,
-      "coverage_pct": 80.0,
-      "q": 1408.0,
-      "error": null
+      "parse_ok": false,
+      "tests_passed": false,
+      "n_tests": 0,
+      "n_assert": null,
+      "coverage_pct": null,
+      "q": 0.0,
+      "error": "[codex-Fehler: Command '['codex', 'exec', '--skip-git-repo-check', '-m', 'gpt-5.4']' timed out after 220 seconds]"
     },
     {
       "provider": "local",
@@ -36,7 +36,7 @@
       "n_assert": 0,
       "coverage_pct": null,
       "q": null,
-      "error": "test parse: invalid syntax (<unknown>, line 5)"
+      "error": "test parse: invalid syntax (<unknown>, line 4)"
     }
   ],
   "canonical_verify": {
