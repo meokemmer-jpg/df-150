@@ -1,83 +1,64 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 # [CRUX-MK]
-import importlib
-
-insurance_module = importlib.import_module("150")
-build_insurance_report = insurance_module.build_insurance_report
-evaluate_asset_coverage = insurance_module.evaluate_asset_coverage
-report_to_json = insurance_module.report_to_json
-
-
-def test_evaluate_asset_coverage_caps_and_detects_gap():
-    result = evaluate_asset_coverage(
-        {
-            "asset_id": "A-1",
-            "asset_name": "Family Home",
-            "asset_value_eur": 500000,
-            "insured_value_eur": 550000,
-            "premium_eur": 1200.456,
-            "open_claims_count": 1,
-        }
+try:
+    exec("from 150 import Asset, Policy, Claim, compute_report")
+except SyntaxError:
+    from importlib import import_module as _import_module
+    _mod = _import_module("150")
+    Asset, Policy, Claim, compute_report = (
+        _mod.Asset,
+        _mod.Policy,
+        _mod.Claim,
+        _mod.compute_report,
     )
 
-    assert result.asset_value_eur == 500000.0
-    assert result.insured_value_eur == 500000.0
-    assert result.coverage_gap_eur == 0.0
-    assert result.insured is True
-    assert result.premium_eur == 1200.46
-    assert result.open_claims_count == 1
 
-
-def test_build_insurance_report_aggregates_totals_and_gaps():
-    report = build_insurance_report(
-        [
-            {
-                "asset_id": "A-1",
-                "asset_name": "Family Home",
-                "asset_value_eur": 500000,
-                "insured_value_eur": 500000,
-                "premium_eur": 1200,
-                "open_claims_count": 1,
-            },
-            {
-                "asset_id": "A-2",
-                "asset_name": "Art Collection",
-                "asset_value_eur": 80000,
-                "insured_value_eur": 30000,
-                "premium_eur": 250,
-                "open_claims_count": 0,
-            },
-            {
-                "asset_id": "A-3",
-                "asset_name": "Jewelry",
-                "asset_value_eur": 20000,
-                "insured_value_eur": 0,
-                "premium_eur": 0,
-                "open_claims_count": 2,
-            },
-        ],
-        report_date="2026-08-23",
-    )
-
-    assert report["report_date"] == "2026-08-23"
-    assert report["totals"] == {
-        "asset_value_eur": 600000.0,
-        "insured_value_eur": 530000.0,
-        "uninsured_value_eur": 70000.0,
-        "premium_total_eur": 1450.0,
-        "open_claims_count": 3,
-    }
-    assert report["coverage_gaps"] == [
-        {"asset_id": "A-2", "asset_name": "Art Collection", "gap_eur": 50000.0},
-        {"asset_id": "A-3", "asset_name": "Jewelry", "gap_eur": 20000.0},
+def test_compute_report_tracks_insurance_status():
+    assets = [
+        Asset("a1", 100.0),
+        Asset("a2", 200.0),
+        Asset("a3", 300.0),
     ]
-    assert report["policy_actions"] == {
-        "auto_policy_buy": False,
-        "auto_policy_cancel": False,
-    }
+    policies = [
+        Policy("p1", "a1", 10.0, 100.0),
+        Policy("p2", "a2", 20.0, 150.0),
+        Policy("p3", "a3", 30.0, 300.0, status="cancelled"),
+    ]
+    claims = [
+        Claim("c1", "p1", "open"),
+        Claim("c2", "p1", "closed"),
+        Claim("c3", "p2", "open"),
+    ]
 
-    payload = report_to_json(report)
-    assert '"report_date": "2026-08-23"' in payload
-    assert '"auto_policy_buy": false' in payload
+    report = compute_report(assets, policies, claims)
+
+    assert report["insured_value_eur"] == 300.0
+    assert report["uninsured_value_eur"] == 300.0
+    assert report["premium_total_eur"] == 30.0
+    assert report["open_claims_count"] == 2
+
+    per_asset = {item["asset_id"]: item for item in report["per_asset"]}
+    assert per_asset["a1"]["insured"] is True
+    assert per_asset["a1"]["coverage_gap"] is False
+    assert per_asset["a2"]["insured"] is True
+    assert per_asset["a2"]["coverage_gap"] is True
+    assert per_asset["a3"]["insured"] is False
+    assert per_asset["a3"]["coverage_gap"] is True
+    assert per_asset["a1"]["open_claims_count"] == 1
+    assert per_asset["a2"]["open_claims_count"] == 1
+    assert per_asset["a3"]["open_claims_count"] == 0
+
+    gaps = {gap["asset_id"]: gap for gap in report["coverage_gaps"]}
+    assert set(gaps) == {"a2", "a3"}
+    assert gaps["a2"]["reason"] == "underinsured"
+    assert gaps["a2"]["gap_eur"] == 50.0
+    assert gaps["a3"]["reason"] == "uninsured"
+    assert gaps["a3"]["gap_eur"] == 300.0
+
+    # No auto-policy-buy/cancel: inputs remain untouched.
+    assert len(policies) == 3
+    assert policies[0].status == "active"
+    assert policies[1].status == "active"
+    assert policies[2].status == "cancelled"
 
