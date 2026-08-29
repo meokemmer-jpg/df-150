@@ -3,56 +3,53 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 # [CRUX-MK]
 import importlib
 
-# `from 150 import ...` is not valid Python syntax because module names in import
-# statements must be identifiers. Load `150.py` via importlib instead.
-m150 = importlib.import_module("150")
-summarize_insurance_status = m150.summarize_insurance_status
+mod = importlib.import_module("150")
+
+compute_insurance_status = mod.compute_insurance_status
+make_asset = mod.make_asset
+make_policy = mod.make_policy
+make_claim = mod.make_claim
 
 
-def test_summarize_insurance_status_tracks_values_claims_and_gaps():
+def test_compute_insurance_status_tracks_core_kpm_metrics():
     assets = [
-        {
-            "asset_id": "house-1",
-            "name": "Family House",
-            "value_eur": 500000,
-            "insured": True,
-            "premium_eur": 1200,
-            "coverage_required": True,
-        },
-        {
-            "asset_id": "car-1",
-            "name": "Car",
-            "value_eur": 30000,
-            "insured": False,
-            "premium_eur": 0,
-            "coverage_required": True,
-        },
-        {
-            "asset_id": "art-1",
-            "name": "Artwork",
-            "value_eur": 20000,
-            "insured": False,
-            "premium_eur": 0,
-            "coverage_required": False,
-        },
+        make_asset("house", "Family House", "500000"),
+        make_asset("art", "Art Collection", "100000"),
+        make_asset("boat", "Boat", "50000"),
+        make_asset("bike", "Vintage Bike", "7000", required_coverage=False),
+    ]
+    policies = [
+        make_policy("p-house", "house", "1200", coverage_limit_eur="500000"),
+        make_policy("p-art", "art", "300", coverage_limit_eur="60000"),
+        make_policy("p-old", "boat", "100", active=False, coverage_limit_eur="50000"),
     ]
     claims = [
-        {"status": "open"},
-        {"status": "closed"},
-        {"status": "pending"},
+        make_claim("c1", "house", "open"),
+        make_claim("c2", "art", "closed"),
+        make_claim("c3", "boat", "OPEN"),
     ]
 
-    result = summarize_insurance_status(assets, claims)
+    result = compute_insurance_status(assets, policies, claims)
 
-    assert result["insured_value_eur"] == 500000.0
-    assert result["uninsured_value_eur"] == 50000.0
-    assert result["premium_total_eur"] == 1200.0
+    assert result["insured_asset_value_eur"] == "560000.00"
+    assert result["uninsured_asset_value_eur"] == "90000.00"
+    assert result["premium_total_eur"] == "1500.00"
     assert result["open_claims_count"] == 2
+    assert result["auto_policy_actions"] == []
+
     assert result["coverage_gaps"] == [
         {
-            "asset_id": "car-1",
-            "name": "Car",
-            "uninsured_value_eur": 30000.0,
-            "reason": "required_asset_uninsured",
-        }
+            "asset_id": "art",
+            "name": "Art Collection",
+            "gap_type": "underinsured",
+            "uncovered_value_eur": "40000.00",
+            "action": "manual_review_only",
+        },
+        {
+            "asset_id": "boat",
+            "name": "Boat",
+            "gap_type": "missing_policy",
+            "uncovered_value_eur": "50000.00",
+            "action": "manual_review_only",
+        },
     ]
