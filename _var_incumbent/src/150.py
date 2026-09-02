@@ -1,61 +1,101 @@
-from __future__ import annotations
+"""df-150 core: per-asset insurance status tracking for KPM (Domain K_0).
 
-from dataclasses import dataclass
-from typing import Iterable, List, Dict, Any
+Read-only analytics over an asset portfolio:
+    * insured / uninsured asset values (EUR)
+    * premium total (EUR)
+    * open claims count
+    * coverage gaps (per-asset, ranked)
+
+Hard guarantee: this module NEVER buys or cancels policies.
+"""
+
+from dataclasses import dataclass, asdict
+from datetime import date
 
 
 @dataclass(frozen=True)
 class Asset:
     name: str
     value_eur: float
-    insured: bool
+    insured_value_eur: float = 0.0
     premium_eur: float = 0.0
-    coverage_required: bool = True
+    open_claims: int = 0
 
 
 @dataclass(frozen=True)
-class Claim:
-    asset_name: str
-    status: str
+class CoverageGap:
+    asset: str
+    gap_eur: float
+    severity: float  # gap/value ratio; 1.0 == completely uninsured
 
 
-def evaluate_insurance_status(
-    assets: Iterable[Asset],
-    claims: Iterable[Claim],
-) -> Dict[str, Any]:
-    asset_list = list(assets)
-    claim_list = list(claims)
+_ALIASES = {
+    "name": ("name",),
+    "value_eur": ("value_eur", "value"),
+    "insured_value_eur": ("insured_value_eur", "insured_value", "insured"),
+    "premium_eur": ("premium_eur", "premium"),
+    "open_claims": ("open_claims", "claims"),
+}
 
-    insured_value = 0.0
-    uninsured_value = 0.0
-    premium_total = 0.0
-    coverage_gaps: List[Dict[str, Any]] = []
 
-    for asset in asset_list:
-        premium_total += float(asset.premium_eur)
+def _coerce(record):
+    """Accept Asset instances or plain dicts (with lenient key aliases)."""
+    if isinstance(record, Asset):
+        return record
+    if not isinstance(record, dict):
+        raise TypeError(f"asset record must be Asset or dict, got {type(record)!r}")
+    kwargs = {}
+    for field, aliases in _ALIASES.items():
+        for alias in aliases:
+            if alias in record:
+                kwargs[field] = record[alias]
+                break
+    if "name" not in kwargs:
+        raise KeyError("asset record must provide a 'name'")
+    return Asset(**kwargs)
 
-        if asset.insured:
-            insured_value += float(asset.value_eur)
-        else:
-            uninsured_value += float(asset.value_eur)
 
-        if asset.coverage_required and not asset.insured:
-            coverage_gaps.append(
-                {
-                    "asset_name": asset.name,
-                    "gap_type": "missing_coverage",
-                    "uninsured_value_eur": float(asset.value_eur),
-                }
-            )
+def coverage_gaps(assets):
+    """All assets where insured value < asset value, biggest gap first."""
+    gaps = []
+    for record in assets:
+        a = _coerce(record)
+        gap = a.value_eur - a.insured_value_eur
+        if gap > 0:
+            severity = gap / a.value_eur if a.value_eur > 0 else 1.0
+            gaps.append(CoverageGap(asset=a.name,
+                                    gap_eur=round(gap, 2),
+                                    severity=round(severity, 4)))
+    return sorted(gaps, key=lambda g: (-g.gap_eur, g.asset))
 
-    open_claims_count = sum(1 for claim in claim_list if claim.status.lower() == "open")
 
+def summarize(assets):
+    """Aggregate insurance status for a portfolio (JSON-safe dict)."""
+    items = [_coerce(r) for r in assets]
+    total = sum(a.value_eur for a in items)
+    insured = sum(a.insured_value_eur for a in items)
+    gaps = coverage_gaps(items)
+    ratio = insured / total if total > 0 else 1.0
     return {
-        "insured_value_eur": round(insured_value, 2),
-        "uninsured_value_eur": round(uninsured_value, 2),
-        "premium_total_eur": round(premium_total, 2),
-        "open_claims_count": open_claims_count,
-        "coverage_gaps": coverage_gaps,
-        "policy_actions": [],  # No auto-buy / auto-cancel.
+        "asset_count": len(items),
+        "total_value_eur": round(total, 2),
+        "insured_value_eur": round(insured, 2),
+        "uninsured_value_eur": round(total - insured, 2),
+        "premium_total_eur": round(sum(a.premium_eur for a in items), 2),
+        "open_claims": sum(a.open_claims for a in items),
+        "coverage_gap_count": len(gaps),
+        "coverage_gaps_eur": round(sum(g.gap_eur for g in gaps), 2),
+        "coverage_ratio": round(ratio, 4),
+        "gaps": [asdict(g) for g in gaps],
+    }
+
+
+def build_report(assets, report_date=None):
+    """Sketch of the df-150 daily report payload (never touching policies)."""
+    return {
+        "mission": "df-150-kpm-insurance-coverage",
+        "date": (report_date or date.today()).isoformat(),
+        "policy_action": "none-read-only",
+        "summary": summarize(assets),
     }
 # [CRUX-MK]
