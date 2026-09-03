@@ -1,88 +1,128 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 # [CRUX-MK]
-# NOTE: the literal statement ``from 150 import ...`` is a SyntaxError --
-# Python module names may not start with a digit. Loading the module named
-# "150" therefore requires importlib.import_module("150"), used below.
-import copy
+# Crux note: "150.py" is a purely numeric module name, therefore the
+# literal import form "from 150 import ..." is not legal Python syntax
+# (identifiers may not start with a digit; it raises SyntaxError before
+# any test runs). The runnable, canonical equivalent of
+# "from 150 import ..." is importlib.import_module("150"); the names
+# bound below are exactly the names the module exports for the tests.
 import importlib
+import json
+import os
+import sys
 from datetime import date
 
-m150 = importlib.import_module("150")
-Asset = m150.Asset
-summarize = m150.summarize
-coverage_gaps = m150.coverage_gaps
-build_report = m150.build_report
+import pytest
 
-PORTFOLIO = [
-    {"name": "Villa Am See",    "value_eur": 2_000_000,
-     "insured_value_eur": 2_000_000, "premium_eur": 8_000, "open_claims": 1},
-    {"name": "Yacht Nordlicht", "value_eur": 500_000,
-     "insured_value_eur": 0, "premium_eur": 0, "open_claims": 0},
-    {"name": "Goya-Sammlung",   "value_eur": 300_000,
-     "insured_value_eur": 180_000, "premium_eur": 2_500, "open_claims": 2},
-]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_150 = importlib.import_module("150")
+
+Asset = _150.Asset
+track_assets = _150.track_assets
+coverage_gaps = _150.coverage_gaps
+build_report = _150.build_report
+write_report = _150.write_report
+stop_requested = _150.stop_requested
+FORBIDDEN_ACTIONS = _150.FORBIDDEN_ACTIONS
 
 
-def test_summary_totals_and_metrics():
-    s = summarize(PORTFOLIO)
-    assert s["asset_count"] == 3
-    assert s["total_value_eur"] == 2_800_000
-    assert s["insured_value_eur"] == 2_180_000
-    assert s["uninsured_value_eur"] == 620_000
-    assert s["premium_total_eur"] == 10_500
-    assert s["open_claims"] == 3
-    assert s["coverage_gap_count"] == 2
-    assert s["coverage_gaps_eur"] == 620_000
-    assert s["coverage_ratio"] == 0.7786
+def make_assets():
+    return (
+        Asset(
+            "family-home",
+            1_000_000.0,
+            insured_value_eur=800_000.0,
+            premium_eur=2_400.0,
+            claims=({"status": "open"}, {"status": "closed"}),
+        ),
+        Asset("bonds", 500_000.0, insured_value_eur=500_000.0, premium_eur=1_000.0),
+        Asset(
+            "art",
+            200_000.0,
+            insured_value_eur=0.0,
+            premium_eur=0.0,
+            claims=({"status": "open"},),
+        ),
+    )
 
 
-def test_gaps_ranked_biggest_first_with_severity():
-    gaps = summarize(PORTFOLIO)["gaps"]
-    assert [g["asset"] for g in gaps] == ["Yacht Nordlicht", "Goya-Sammlung"]
-    assert gaps[0]["gap_eur"] == 500_000 and gaps[0]["severity"] == 1.0
-    assert gaps[1]["gap_eur"] == 120_000 and gaps[1]["severity"] == 0.4
+def test_summary_aggregation_is_exact():
+    s = track_assets(make_assets())
+    assert s.total_asset_value_eur == 1_700_000.0
+    assert s.insured_value_eur == 1_300_000.0
+    assert s.uninsured_value_eur == 400_000.0  # 200k home + 200k art
+    assert s.premium_total_eur == 3_400.0
+    assert s.open_claims_count == 2  # one open claim each on home & art
+    assert s.coverage_gap_count == 2
+    assert s.coverage_gap_value_eur == 400_000.0
+    assert s.coverage_ratio == pytest.approx(1_300_000.0 / 1_700_000.0)
 
 
-def test_asset_objects_mixed_with_dicts_and_alias_keys():
-    records = [
-        Asset(name="Uhr", value_eur=50_000, insured_value_eur=50_000),
-        {"name": "Auto", "value": 90_000, "insured_value": 60_000,
-         "premium": 700, "claims": 1},
-    ]
-    s = summarize(records)
-    assert s["asset_count"] == 2
-    assert s["coverage_gap_count"] == 1
-    assert s["gaps"][0]["asset"] == "Auto"
-    assert s["gaps"][0]["gap_eur"] == 30_000
+def test_coverage_gaps_flags_underinsured_and_uninsured_only():
+    gaps = coverage_gaps(make_assets())
+    ids = {g["asset_id"] for g in gaps}
+    assert ids == {"family-home", "art"}  # fully-insured "bonds" excluded
+    for g in gaps:
+        assert g["uninsured_value_eur"] > 0
+        assert g["recommendation"]["auto"] is False
+        assert g["recommendation"]["action"] == "review-manually"
 
 
-def test_fully_insured_portfolio_has_no_gap():
-    s = summarize([Asset(name="Watch", value_eur=50_000,
-                         insured_value_eur=50_000)])
-    assert s["coverage_gap_count"] == 0
-    assert s["coverage_ratio"] == 1.0
+def test_no_auto_policy_buy_or_cancel_anywhere():
+    report = build_report(make_assets())
+    assert report["auto_policy_actions"] == []
+    blob = json.dumps(report)
+    for forbidden in FORBIDDEN_ACTIONS:
+        assert forbidden not in blob
+    for gap in report["coverage_gaps"]:
+        assert gap["recommendation"]["auto"] is False
+
+
+def test_report_is_json_serializable_and_held_together():
+    report = build_report(make_assets())
+    text = json.dumps(report)  # must not raise
+    loaded = json.loads(text)
+    assert loaded["factory"] == "df-150"
+    assert loaded["domain"] == "K_0"
+    assert loaded["welle"] == 25
+    assert loaded["summary"]["premium_total_eur"] == 3_400.0
+    assert loaded["summary"]["open_claims_count"] == 2
+    assert len(loaded["coverage_gaps"]) == 2
+
+
+def test_write_report_persists_df_150_file(tmp_path):
+    report = build_report(make_assets())
+    path = write_report(report, reports_dir=str(tmp_path))
+    name = os.path.basename(path)
+    assert name == f"df-150-{date.today().isoformat()}.json"
+    with open(path, encoding="utf-8") as fh:
+        loaded = json.load(fh)
+    assert loaded["summary"]["uninsured_value_eur"] == 400_000.0
+    assert loaded["auto_policy_actions"] == []
+
+
+def test_stop_flag_detection(tmp_path):
+    flag = tmp_path / "df-150.stop"
+    assert stop_requested(str(flag)) is False
+    flag.touch()
+    assert stop_requested(str(flag)) is True
 
 
 def test_empty_portfolio_is_safe():
-    s = summarize([])
-    assert s["asset_count"] == 0
-    assert s["coverage_gap_count"] == 0
-    assert s["coverage_ratio"] == 1.0
-    assert s["gaps"] == []
+    s = track_assets([])
+    assert s.total_asset_value_eur == 0.0
+    assert s.coverage_ratio == 0.0  # no division-by-zero
+    assert s.coverage_gap_count == 0
 
 
-def test_report_payload_shape():
-    rpt = build_report(PORTFOLIO, report_date=date(2025, 1, 15))
-    assert rpt["mission"] == "df-150-kpm-insurance-coverage"
-    assert rpt["date"] == "2025-01-15"
-    assert rpt["policy_action"] == "none-read-only"
-    assert rpt["summary"]["uninsured_value_eur"] == 620_000
-
-
-def test_inputs_are_never_mutated():
-    frozen = copy.deepcopy(PORTFOLIO)
-    summarize(PORTFOLIO)
-    build_report(PORTFOLIO)
-    assert PORTFOLIO == frozen
+def test_tracking_never_mutates_assets():
+    assets = make_assets()
+    track_assets(assets)
+    coverage_gaps(assets)
+    build_report(assets)
+    # frozen dataclasses + read-only aggregation: values unchanged
+    assert assets[0].value_eur == 1_000_000.0
+    assert assets[0].insured_value_eur == 800_000.0
+    assert assets[2].open_claims == 1
 
