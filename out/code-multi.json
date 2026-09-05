@@ -1,6 +1,6 @@
 {
   "df": "df-150",
-  "ts": "2026-09-05T01:32:14.968632+00:00",
+  "ts": "2026-09-05T02:58:32.042979+00:00",
   "crux": "[CRUX-MK]",
   "winner_provider": "incumbent-kept",
   "winner_tests_passed": true,
@@ -36,7 +36,7 @@
       "n_assert": 0,
       "coverage_pct": null,
       "q": null,
-      "error": "test parse: invalid syntax (<unknown>, line 4)"
+      "error": "test parse: invalid syntax (<unknown>, line 12)"
     }
   ],
   "canonical_verify": {
