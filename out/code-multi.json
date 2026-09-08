@@ -1,8 +1,9 @@
 {
   "df": "df-150",
-  "ts": "2026-09-07T02:52:36.957391+00:00",
+  "ts": "2026-09-08T02:12:58.825966+00:00",
   "crux": "[CRUX-MK]",
   "winner_provider": "incumbent-kept",
+  "gate_refused": null,
   "winner_tests_passed": true,
   "incumbent_q": 1627.0,
   "winner_q": 1627.0,
