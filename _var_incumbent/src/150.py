@@ -363,6 +363,14 @@ def run_mock_mode() -> KPMInsuranceTracker:
     return t
 
 
-if __name__ == "__main__":
+def __df_guarded_entry():  # K16+K11-FOUNDATION-WIRED [CRUX-MK]
     run_mock_mode()
+
+if __name__ == "__main__":  # K16+K11-FOUNDATION-WIRED [CRUX-MK]
+    try:
+        from _df_common.df_foundation import run_guarded as _rg
+    except Exception:
+        raise SystemExit(__df_guarded_entry())   # Foundation weg -> normal
+    raise SystemExit(_rg("df-150", __df_guarded_entry))   # K14+K16+K15+K11 echt
+
 # [CRUX-MK]
