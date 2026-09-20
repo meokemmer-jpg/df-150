@@ -1,6 +1,6 @@
 {
   "df": "df-150",
-  "ts": "2026-09-19T02:25:13.589292+00:00",
+  "ts": "2026-09-20T02:12:27.168236+00:00",
   "crux": "[CRUX-MK]",
   "winner_provider": "incumbent-kept",
   "gate_refused": null,
@@ -32,12 +32,12 @@
     {
       "provider": "local",
       "parse_ok": true,
-      "tests_passed": false,
-      "n_tests": 0,
-      "n_assert": 0,
-      "coverage_pct": null,
-      "q": null,
-      "error": "test parse: invalid syntax (<unknown>, line 5)"
+      "tests_passed": true,
+      "n_tests": 4,
+      "n_assert": 20,
+      "coverage_pct": 89.0,
+      "q": 1477.0,
+      "error": null
     }
   ],
   "canonical_verify": {
