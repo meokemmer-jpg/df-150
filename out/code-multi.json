@@ -1,6 +1,6 @@
 {
   "df": "df-150",
-  "ts": "2026-10-01T01:07:28.448693+00:00",
+  "ts": "2026-10-02T01:56:01.051519+00:00",
   "crux": "[CRUX-MK]",
   "winner_provider": "incumbent-kept",
   "gate_refused": null,
@@ -33,10 +33,10 @@
       "provider": "local",
       "parse_ok": true,
       "tests_passed": true,
-      "n_tests": 6,
-      "n_assert": 25,
-      "coverage_pct": 85.0,
-      "q": 1468.0,
+      "n_tests": 2,
+      "n_assert": 16,
+      "coverage_pct": 100.0,
+      "q": 1522.0,
       "error": null
     }
   ],
