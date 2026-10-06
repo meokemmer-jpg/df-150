@@ -1,6 +1,6 @@
 {
   "df": "df-150",
-  "ts": "2026-10-05T01:41:10.623061+00:00",
+  "ts": "2026-10-06T01:53:36.905189+00:00",
   "crux": "[CRUX-MK]",
   "winner_provider": "incumbent-kept",
   "gate_refused": null,
@@ -31,13 +31,13 @@
     },
     {
       "provider": "local",
-      "parse_ok": false,
+      "parse_ok": true,
       "tests_passed": false,
       "n_tests": 0,
       "n_assert": 0,
       "coverage_pct": null,
       "q": null,
-      "error": "module parse: invalid decimal literal (<unknown>, line 1)"
+      "error": "test parse: invalid syntax (<unknown>, line 4)"
     }
   ],
   "canonical_verify": {
